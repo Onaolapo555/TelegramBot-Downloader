@@ -1,0 +1,13 @@
+{
+  "start": "👋 <b>UniMedia Downloader</b>\n\nJust send me any video link — YouTube, TikTok, Instagram, X/Twitter, Facebook, Reddit, Vimeo, Twitch & 1000+ sites.\n\nI’ll fetch the best quality instantly. Choose 1080p/720p/480p or Audio-only.\n\n<i>Tip: set your default quality in /settings</i>",
+  "help": "🆘 <b>How to use</b>\n\n1. Send a link (e.g. https://youtu.be/...)\n2. Pick quality from the buttons\n3. Get your file — big files (up to 2GB) supported!\n\n<b>Commands</b>\n/start - welcome\n/help - this message\n/settings - default quality & language\n/stats - bot stats\n\n<i>Privacy: files are deleted after delivery (10 min).</i>",
+  "settings": "⚙️ <b>Settings</b>\nChoose your default quality. This will be pre-selected next time.",
+  "choose_quality": "🎯 <b>Choose quality</b>\n\n{title}\n⏱ {duration} • 👤 {uploader}",
+  "downloading": "⬇️ Downloading… {pct} • {speed} • ETA {eta}",
+  "uploading": "⬆️ Uploading to Telegram…",
+  "done": "✅ Done!",
+  "error": "❌ Failed: {err}\nTry another quality or send the link again.",
+  "rate_limited": "⏳ Too many requests. Please wait {sec}s.",
+  "no_url": "🔍 No link detected. Please send a valid video URL.",
+  "probing": "🔍 Probing link…"
+}

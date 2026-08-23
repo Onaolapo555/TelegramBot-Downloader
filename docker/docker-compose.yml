@@ -1,0 +1,92 @@
+name: unimedia
+
+services:
+  # --- Bot (aiogram) ---
+  bot:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: unimedia-bot:latest
+    container_name: unimedia-bot
+    env_file:
+      - ../.env
+    volumes:
+      - ../data/downloads:/app/data/downloads
+      - ../data/cookies:/app/data/cookies
+    depends_on:
+      - redis
+      - postgres
+      # uncomment when using Local Bot API:
+      # - telegram-bot-api
+    command: python -m app.main --polling
+    # for webhook mode: python -m app.main --webhook
+    # ports:
+    #   - "8080:8080"
+    restart: unless-stopped
+
+  # --- Worker (arq) - scale this! ---
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: unimedia-bot:latest
+    container_name: unimedia-worker
+    env_file:
+      - ../.env
+    volumes:
+      - ../data/downloads:/app/data/downloads
+      - ../data/cookies:/app/data/cookies
+    depends_on:
+      - redis
+      - postgres
+    command: arq app.workers.tasks.WorkerSettings
+    deploy:
+      replicas: 2
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: unimedia-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: unimedia-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: unimedia
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # --- Local Bot API Server (for 2GB files) ---
+  # Requires BOT_API_ID/BOT_API_HASH from https://my.telegram.org
+  # Uncomment to enable. Then set in .env:
+  # USE_LOCAL_BOT_API=true
+  # LOCAL_BOT_API_URL=http://telegram-bot-api:8081
+  # And set bot's server to local in app/config.py (already handled)
+  #
+  # telegram-bot-api:
+  #   image: aiogram/telegram-bot-api:latest
+  #   container_name: unimedia-bot-api
+  #   environment:
+  #     TELEGRAM_API_ID: ${BOT_API_ID}
+  #     TELEGRAM_API_HASH: ${BOT_API_HASH}
+  #     TELEGRAM_LOCAL: "1"
+  #   ports:
+  #     - "8081:8081"
+  #   volumes:
+  #     - bot_api_data:/var/lib/telegram-bot-api
+  #   restart: unless-stopped
+
+volumes:
+  redis_data:
+  pg_data:
+  # bot_api_data:
