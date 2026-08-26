@@ -29,6 +29,12 @@ class RateLimitMiddleware(BaseMiddleware):
         user = getattr(event, "from_user", None)
         if not user:
             return await handler(event, data)
+        # Admin bypass (Phase-4): admins never rate-limited
+        try:
+            if user.id in (get_settings().admin_user_ids or []):
+                return await handler(event, data)
+        except Exception:
+            pass
 
         # Only limit download intents
         should_check = False
