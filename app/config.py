@@ -16,6 +16,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
+        env_ignore_empty=True,
     )
 
     # Telegram
@@ -61,6 +62,34 @@ class Settings(BaseSettings):
     # Reliability
     auto_downgrade_large_files: bool = Field(default=True, alias="AUTO_DOWNGRADE_LARGE_FILES")
     large_file_threshold_bytes: int = Field(default=1900 * 1024 * 1024, alias="LARGE_FILE_THRESHOLD_BYTES")
+
+    # Phase-4: Admin / monetize
+    admin_user_ids: list[int] = Field(default_factory=list, alias="ADMIN_USER_IDS")
+    donate_url: str | None = Field(default=None, alias="DONATE_URL")
+    donate_text: str = Field(default="❤️ Support UniMedia — keep the fastest downloader alive!", alias="DONATE_TEXT")
+
+    @field_validator("admin_user_ids", mode="before")
+    @classmethod
+    def _parse_admin_ids(cls, v):
+        if v is None or v == "" or v == []:
+            return []
+        if isinstance(v, list):
+            return [int(x) for x in v]
+        if isinstance(v, str):
+            import json
+
+            v = v.strip()
+            if not v:
+                return []
+            if v.startswith("["):
+                try:
+                    return [int(x) for x in json.loads(v)]
+                except Exception:
+                    pass
+            # comma or space separated
+            parts = v.replace(";", ",").replace(" ", ",").split(",")
+            return [int(p) for p in parts if p.strip().isdigit() or p.strip().lstrip("-").isdigit()]
+        return v
 
     @field_validator("download_dir", "cookies_dir", mode="before")
     @classmethod

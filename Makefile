@@ -1,4 +1,4 @@
-.PHONY: run dev worker docker lint test clean update
+.PHONY: run dev worker docker docker-local docker-scale lint test clean update
 
 run:
 	python -m app.main --polling
@@ -12,8 +12,17 @@ worker:
 docker:
 	docker compose -f docker/docker-compose.yml up --build
 
+docker-local:
+	docker compose --profile local-api -f docker/docker-compose.yml up --build
+
+docker-scale:
+	docker compose -f docker/docker-compose.yml up --scale worker=3 --build
+
 docker-down:
 	docker compose -f docker/docker-compose.yml down
+
+docker-logs:
+	docker compose -f docker/docker-compose.yml logs -f bot worker
 
 lint:
 	ruff check app

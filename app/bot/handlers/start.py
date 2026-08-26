@@ -112,3 +112,9 @@ async def cb_lang(callback: CallbackQuery, lang: str = "en"):
         await callback.message.answer(t("start", new_lang))  # type: ignore
     except Exception:
         pass
+
+
+@router.message(Command("language"))
+@router.message(Command("lang"))
+async def cmd_language(message: Message, lang: str = "en"):
+    await message.answer("🌐 Choose language:", reply_markup=language_keyboard(lang))

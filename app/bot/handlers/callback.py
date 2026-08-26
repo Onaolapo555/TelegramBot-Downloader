@@ -65,6 +65,17 @@ async def cb_download(callback: CallbackQuery, lang: str = "en"):
     await callback.answer(f"Downloading {qual_key}…")
 
     # Create job record for tracking / stats
+    # Abuse: concurrent per-user limit (Phase-4 hardening)
+    try:
+        from app.services.job_service import count_active_jobs
+
+        active = await count_active_jobs(callback.from_user.id)
+        if active >= get_settings().max_concurrent_downloads:
+            await callback.answer(f"⏳ You have {active} active downloads. Wait for them to finish.", show_alert=True)
+            return
+    except Exception:
+        pass
+
     job = None
     try:
         job = await create_job(callback.from_user.id, callback.message.chat.id, url, qual_key)  # type: ignore

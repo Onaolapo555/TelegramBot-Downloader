@@ -20,11 +20,12 @@ def create_bot() -> Bot:
 
 
 def create_dispatcher() -> Dispatcher:
-    from app.bot.handlers import callback, url_handler
+    from app.bot.handlers import admin, callback, url_handler
     from app.bot.handlers import start as start_h
 
     dp = Dispatcher()
     dp.include_router(start_h.router)
+    dp.include_router(admin.router)
     dp.include_router(url_handler.router)
     dp.include_router(callback.router)
     return dp

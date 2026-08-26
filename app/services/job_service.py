@@ -48,3 +48,16 @@ async def recent_jobs(limit: int = 5) -> list[Job]:
 
 async def total_jobs() -> int:
     return await count_jobs()
+
+
+async def count_active_jobs(user_id: int) -> int:
+    """Count queued/downloading/uploading jobs for a user (concurrent limit)."""
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await session.execute(
+            select(func.count())
+            .select_from(Job)
+            .where(Job.user_id == user_id)
+            .where(Job.status.in_(["queued", "downloading", "uploading"]))
+        )
+        return result.scalar() or 0
