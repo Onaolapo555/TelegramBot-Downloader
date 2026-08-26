@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     tmp_cleanup_seconds: int = Field(default=600, alias="TMP_CLEANUP_SECONDS")
     allow_playlist: bool = Field(default=False, alias="ALLOW_PLAYLIST")
     playlist_max_items: int = Field(default=5, alias="PLAYLIST_MAX_ITEMS")
+    # Reliability
+    auto_downgrade_large_files: bool = Field(default=True, alias="AUTO_DOWNGRADE_LARGE_FILES")
+    large_file_threshold_bytes: int = Field(default=1900 * 1024 * 1024, alias="LARGE_FILE_THRESHOLD_BYTES")
 
     @field_validator("download_dir", "cookies_dir", mode="before")
     @classmethod

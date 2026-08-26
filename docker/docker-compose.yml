@@ -72,27 +72,30 @@ services:
       - pg_data:/var/lib/postgresql/data
     restart: unless-stopped
 
-  # --- Local Bot API Server (for 2GB files) ---
-  # Requires BOT_API_ID/BOT_API_HASH from https://my.telegram.org
-  # Uncomment to enable. Then set in .env:
-  # USE_LOCAL_BOT_API=true
-  # LOCAL_BOT_API_URL=http://telegram-bot-api:8081
-  # And set bot's server to local in app/config.py (already handled)
-  #
-  # telegram-bot-api:
-  #   image: aiogram/telegram-bot-api:latest
-  #   container_name: unimedia-bot-api
-  #   environment:
-  #     TELEGRAM_API_ID: ${BOT_API_ID}
-  #     TELEGRAM_API_HASH: ${BOT_API_HASH}
-  #     TELEGRAM_LOCAL: "1"
-  #   ports:
-  #     - "8081:8081"
-  #   volumes:
-  #     - bot_api_data:/var/lib/telegram-bot-api
-  #   restart: unless-stopped
+  # --- Local Bot API Server (for 2GB files) - Phase-3 critical ---
+  # Enables Telegram 2GB uploads (vs 50MB cloud). After starting, set in .env:
+  #   BOT_API_ID=12345
+  #   BOT_API_HASH=your_hash_from_my.telegram.org
+  #   USE_LOCAL_BOT_API=true
+  #   LOCAL_BOT_API_URL=http://telegram-bot-api:8081
+  # Then: docker compose -f docker/docker-compose.yml up --build -d telegram-bot-api bot worker
+  # Note: telegram-bot-api image is large (~300MB) and needs API_ID/HASH; leave disabled for 50MB cloud mode.
+  telegram-bot-api:
+    image: aiogram/telegram-bot-api:latest
+    container_name: unimedia-bot-api
+    environment:
+      TELEGRAM_API_ID: ${BOT_API_ID:-0}
+      TELEGRAM_API_HASH: ${BOT_API_HASH:-dummy}
+      TELEGRAM_LOCAL: "1"
+    ports:
+      - "8081:8081"
+    volumes:
+      - bot_api_data:/var/lib/telegram-bot-api
+    restart: unless-stopped
+    profiles:
+      - local-api  # start with: docker compose --profile local-api up -d
 
 volumes:
   redis_data:
   pg_data:
-  # bot_api_data:
+  bot_api_data:

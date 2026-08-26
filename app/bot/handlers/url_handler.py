@@ -7,9 +7,10 @@ from aiogram import F, Router
 from aiogram.types import Message
 
 from app.bot.keyboards.inline import cache_url_async, quality_keyboard
+from app.core.downloader import estimate_filesize
 from app.core.metadata import probe_metadata
 from app.services.user_service import get_user_quality, upsert_user
-from app.utils.format import human_duration
+from app.utils.format import human_bytes, human_duration
 from app.utils.i18n import t
 from app.utils.url import extract_urls
 
@@ -64,6 +65,18 @@ async def handle_url(message: Message, lang: str = "en"):
         caption += f"👁 {meta['view_count']:,}\n"
     if meta.get("extractor_key"):
         caption += f"🌐 {meta['extractor_key']}\n"
+    # Estimated size hint (Phase-3)
+    try:
+        est = estimate_filesize(meta, default_q)  # type: ignore
+        if est:
+            caption += f"📦 ~{human_bytes(est)} (est. {default_q})\n"
+            if est > 1900 * 1024 * 1024:
+                caption += "⚠️ Estimated >1.9GB — will auto-downgrade if needed or use R2 link.\n"
+    except Exception:
+        pass
+    # Resolution hint
+    if meta.get("width") and meta.get("height"):
+        caption += f"📐 {meta['width']}x{meta['height']}\n"
     caption += f"🔗 <code>{html.escape(url[:80])}</code>"
     if default_q != "best":
         caption += f"\n\n💡 Your default: <b>{default_q}</b> (tap ✅). Change in /settings"

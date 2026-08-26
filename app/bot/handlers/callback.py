@@ -10,7 +10,7 @@ from aiogram.types import CallbackQuery
 
 from app.bot.keyboards.inline import get_cached_url_async
 from app.config import get_settings
-from app.core.downloader import Quality, download_media
+from app.core.downloader import Quality, auto_downgrade_quality, download_media
 from app.core.metadata import probe_metadata
 from app.core.uploader import smart_send
 from app.services.job_service import create_job, update_job_status
@@ -156,12 +156,32 @@ async def _do_download(callback: CallbackQuery, url: str, quality: Quality, job_
         except Exception:
             pass
 
-    # Run yt-dlp probe for caption before download (for pretty caption)
+    # Run yt-dlp probe for caption before download (for pretty caption) + auto-downgrade
     meta: dict = {}
     try:
         meta = await probe_metadata(url)
     except Exception:
         meta = {"webpage_url": url, "title": "Media"}
+
+    # Auto-downgrade if estimated > threshold and enabled
+    try:
+        from app.config import get_settings as _gs
+
+        if _gs().auto_downgrade_large_files:
+            orig_q = quality
+            new_q = auto_downgrade_quality(meta, orig_q)
+            if new_q != orig_q:
+                log.info("auto-downgrade direct %s -> %s", orig_q, new_q)
+                quality = new_q
+                try:
+                    await _safe_edit(
+                        status_msg,
+                        f"⚠️ Large file >1.9GB estimated — auto downgraded <b>{orig_q}</b> → <b>{new_q}</b>.",
+                    )
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
     filepath: Path | None = None
     try:

@@ -27,7 +27,7 @@ def human_duration(seconds: float | None) -> str:
     return f"{h}h {m}m {s}s" if s else f"{h}h {m}m"
 
 
-def format_caption(meta: dict, quality_label: str | None = None) -> str:
+def format_caption(meta: dict, quality_label: str | None = None, filesize: int | None = None) -> str:
     title = html.escape((meta.get("title") or "Untitled")[:300])
     uploader = html.escape((meta.get("uploader") or meta.get("channel") or "Unknown")[:120])
     duration = human_duration(meta.get("duration"))
@@ -37,13 +37,28 @@ def format_caption(meta: dict, quality_label: str | None = None) -> str:
     q = f" • {quality_label}" if quality_label else ""
     source = html.escape(meta.get("extractor_key") or meta.get("extractor") or "unknown")
     url = meta.get("webpage_url") or meta.get("original_url") or ""
+    # Filesize if known
+    size_str = human_bytes(filesize) if filesize else ""
+    # Resolution if available
+    wh = ""
+    if meta.get("width") and meta.get("height"):
+        wh = f" • {meta['width']}x{meta['height']}"
 
     lines = [
         f"🎬 <b>{title}</b>",
-        f"👤 {uploader}  •  ⏱ {duration}  •  👁 {views_str}{q}",
-        f"📦 {ext}  •  🌐 {source}",
+        f"👤 {uploader}  •  ⏱ {duration}  •  👁 {views_str}{q}{wh}",
+        f"📦 {ext}" + (f" • {size_str}" if size_str else "") + f"  •  🌐 {source}",
     ]
     if url:
         lines.append(f'🔗 <a href="{html.escape(url)}">Source</a>')
     lines.append("⚡️ via UniMedia Bot")
     return "\n".join(lines)
+
+
+def format_probe_summary(meta: dict) -> str:
+    """One-liner for logs / debugging probe."""
+    title = (meta.get("title") or "Untitled")[:80]
+    dur = human_duration(meta.get("duration"))
+    ext = meta.get("extractor_key") or meta.get("extractor") or "?"
+    size = human_bytes(meta.get("filesize") or meta.get("filesize_approx"))
+    return f"{title} | {dur} | {size} | {ext}"

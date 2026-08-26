@@ -7,7 +7,7 @@ from pathlib import Path
 from arq.connections import RedisSettings
 
 from app.config import get_settings
-from app.core.downloader import download_media
+from app.core.downloader import auto_downgrade_quality, download_media
 from app.core.metadata import probe_metadata
 from app.core.uploader import smart_send
 from app.services.job_service import create_job, update_job_status
@@ -63,15 +63,37 @@ async def download_job(
             _edit_progress(bot, chat_id, status_message_id, d, url), loop
         )
 
-    # probe meta for caption
+    # probe meta for caption + auto-downgrade check (1.9GB Telegram Local limit)
     try:
         meta = await probe_metadata(url)
     except Exception:
         meta = {"webpage_url": url, "title": "Media"}
 
+    # Auto-downgrade if estimate > threshold and flag enabled
+    try:
+        from app.config import get_settings as _gs
+
+        if _gs().auto_downgrade_large_files:
+            orig_q = quality  # type: ignore
+            new_q = auto_downgrade_quality(meta, orig_q)  # type: ignore
+            if new_q != orig_q:
+                log.info("auto-downgrade %s -> %s due to size estimate", orig_q, new_q)
+                quality = new_q  # type: ignore
+                try:
+                    await bot.edit_message_text(
+                        f"⚠️ Large file estimated >1.9GB — auto downgraded <b>{orig_q}</b> → <b>{new_q}</b> to fit Telegram limit. "
+                        f"For original quality, enable R2 fallback.",
+                        chat_id=chat_id,
+                        message_id=status_message_id,
+                    )
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
     filepath: Path | None = None
     try:
-        await bot.edit_message_text("⬇️ Downloading…", chat_id=chat_id, message_id=status_message_id)
+        await bot.edit_message_text(f"⬇️ Downloading <b>{quality}</b>…", chat_id=chat_id, message_id=status_message_id)
 
         filepath = await asyncio.to_thread(download_media, url, quality, hook)  # type: ignore
 
