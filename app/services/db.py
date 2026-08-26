@@ -44,6 +44,18 @@ async def init_db() -> None:
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Ensure indexes exist for existing DBs (lightweight & fast count_active_jobs / prune)
+        try:
+            from sqlalchemy import text
+
+            # These are safe to run even if indexes already exist
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_jobs_user_status ON jobs (user_id, status)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_jobs_created_at ON jobs (created_at)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_jobs_status ON jobs (status)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_jobs_user_id ON jobs (user_id)"))
+        except Exception:
+            # Ignore if DB doesn't support IF NOT EXISTS or already exists (e.g., SQLite create_all already did)
+            pass
 
 
 async def get_session() -> AsyncSession:  # type: ignore

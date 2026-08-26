@@ -83,6 +83,11 @@ class Settings(BaseSettings):
     probe_cache_ttl: int = Field(default=900, alias="PROBE_CACHE_TTL")  # 15 min
     aria2c_max_connections: int = Field(default=16, alias="ARIA2C_MAX_CONNECTIONS")
 
+    # DB lightweight & zero storage
+    job_retention_days: int = Field(default=7, alias="JOB_RETENTION_DAYS")
+    job_cleanup_interval_seconds: int = Field(default=3600, alias="JOB_CLEANUP_INTERVAL_SECONDS")  # hourly prune
+    file_retention_seconds: int | None = Field(default=None, alias="FILE_RETENTION_SECONDS")  # override TMP_CLEANUP_SECONDS for files; None=use TMP_CLEANUP_SECONDS
+
     @field_validator("admin_user_ids", mode="before")
     @classmethod
     def _parse_admin_ids(cls, v):

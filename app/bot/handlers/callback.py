@@ -64,15 +64,17 @@ async def cb_download(callback: CallbackQuery, lang: str = "en"):
 
     await callback.answer(f"Downloading {qual_key}…")
 
-    # Create job record for tracking / stats
-    # Abuse: concurrent per-user limit (Phase-4 hardening)
+    # Abuse: concurrent per-user limit (Phase-4 hardening) — admins bypass for bulk fastest
     try:
-        from app.services.job_service import count_active_jobs
+        s_check = get_settings()
+        is_admin = callback.from_user.id in (s_check.admin_user_ids or [])
+        if not is_admin:
+            from app.services.job_service import count_active_jobs
 
-        active = await count_active_jobs(callback.from_user.id)
-        if active >= get_settings().max_concurrent_downloads:
-            await callback.answer(f"⏳ You have {active} active downloads. Wait for them to finish.", show_alert=True)
-            return
+            active = await count_active_jobs(callback.from_user.id)
+            if active >= s_check.max_concurrent_downloads:
+                await callback.answer(f"⏳ You have {active} active downloads. Wait for them to finish.", show_alert=True)
+                return
     except Exception:
         pass
 

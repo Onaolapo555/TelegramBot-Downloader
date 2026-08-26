@@ -97,6 +97,65 @@ async def get_cached_url_redis(h: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Probe cache (metadata probe result) - Redis + fallback memory, 15min TTL
+# ---------------------------------------------------------------------------
+
+_PROBE_TTL_DEFAULT = 900
+_mem_probe_cache: dict[str, tuple[str, float]] = {}  # key -> (json_str, expiry)
+
+
+async def cache_probe(url: str, meta: dict, ttl: int = _PROBE_TTL_DEFAULT) -> None:
+    import json
+
+    try:
+        # Use json with safe serialization (drop non-serializable)
+        payload = json.dumps(meta, ensure_ascii=False, default=str)
+    except Exception:
+        return
+    client = await get_redis()
+    key = f"probe:{hash(url) & 0x7FFFFFFF}:{url[:80]}"
+    # Use simple hash for key to avoid huge keys, but include url hash
+    import hashlib
+
+    h = hashlib.sha256(url.encode()).hexdigest()[:16]
+    rkey = f"probe:{h}"
+    if client is not None:
+        try:
+            await client.setex(rkey, ttl, payload)
+            return
+        except Exception:
+            pass
+    _mem_probe_cache[rkey] = (payload, time.monotonic() + ttl)
+
+
+async def get_cached_probe(url: str) -> dict | None:
+    import hashlib
+    import json
+
+    h = hashlib.sha256(url.encode()).hexdigest()[:16]
+    rkey = f"probe:{h}"
+    client = await get_redis()
+    if client is not None:
+        try:
+            val = await client.get(rkey)
+            if val:
+                return json.loads(val)
+        except Exception:
+            pass
+    entry = _mem_probe_cache.get(rkey)
+    if entry:
+        payload, exp = entry
+        if time.monotonic() < exp:
+            try:
+                return json.loads(payload)
+            except Exception:
+                return None
+        else:
+            _mem_probe_cache.pop(rkey, None)
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Rate limiting helpers (Redis INCR + EXPIRE, fallback to in-memory)
 # ---------------------------------------------------------------------------
 

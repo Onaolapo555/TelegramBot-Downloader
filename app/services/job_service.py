@@ -61,3 +61,19 @@ async def count_active_jobs(user_id: int) -> int:
             .where(Job.status.in_(["queued", "downloading", "uploading"]))
         )
         return result.scalar() or 0
+
+
+async def prune_old_jobs(days: int = 7) -> int:
+    """Delete old done/failed jobs older than retention - keeps DB lightweight."""
+    from datetime import datetime, timedelta, timezone
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    factory = get_session_factory()
+    async with factory() as session:
+        # Only prune terminal states, keep queued/downloading/uploading even if old (should not happen)
+        from sqlalchemy import delete
+
+        stmt = delete(Job).where(Job.created_at < cutoff).where(Job.status.in_(["done", "failed"]))
+        result = await session.execute(stmt)
+        await session.commit()
+        return result.rowcount or 0
