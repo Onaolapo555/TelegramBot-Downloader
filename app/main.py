@@ -6,13 +6,14 @@ import logging
 import sys
 
 import structlog
-from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiohttp import web
 
 from app.bot import create_bot, create_dispatcher
-from app.bot.middlewares.rate_limit import RateLimitMiddleware
+from app.bot.middlewares.db import UserMiddleware
 from app.bot.middlewares.i18n import I18nMiddleware
+from app.bot.middlewares.rate_limit import RateLimitMiddleware
 from app.config import get_settings
 from app.core.cleanup import cleanup_loop
 from app.services.db import init_db
@@ -43,6 +44,18 @@ async def on_startup(bot: Bot):
     except Exception as e:
         log.warning("db_init_failed", error=str(e))
 
+    # init Redis (test connection, graceful fallback)
+    try:
+        from app.services.redis import get_redis
+
+        r = await get_redis()
+        if r is not None:
+            log.info("redis_ready", url=s.redis_url.split("@")[-1])
+        else:
+            log.info("redis_disabled - using in-memory fallbacks")
+    except Exception as e:
+        log.warning("redis_init_failed", error=str(e))
+
     # webhook setup
     if s.use_webhook and s.webhook_url:
         await bot.set_webhook(
@@ -66,6 +79,16 @@ async def on_startup(bot: Bot):
 
 async def on_shutdown(bot: Bot):
     log.info("shutdown")
+    try:
+        from app.services.redis import close_redis
+
+        await close_redis()
+    except Exception:
+        pass
+    try:
+        await bot.session.close()
+    except Exception:
+        pass
 
 
 def build_app() -> tuple[Bot, Dispatcher, web.Application | None]:
@@ -73,54 +96,107 @@ def build_app() -> tuple[Bot, Dispatcher, web.Application | None]:
     bot = create_bot()
     dp = create_dispatcher()
 
-    # middlewares
+    # middlewares - order matters: UserMiddleware first to upsert, then rate/i18n
+    dp.message.middleware(UserMiddleware())
+    dp.callback_query.middleware(UserMiddleware())
     dp.message.middleware(RateLimitMiddleware())
     dp.callback_query.middleware(RateLimitMiddleware())
     dp.message.middleware(I18nMiddleware())
     dp.callback_query.middleware(I18nMiddleware())
 
-    dp.startup.register(lambda: on_startup(bot))
-    dp.shutdown.register(lambda: on_shutdown(bot))
+    async def _startup_wrapper():
+        await on_startup(bot)
+
+    async def _shutdown_wrapper():
+        await on_shutdown(bot)
+
+    dp.startup.register(_startup_wrapper)
+    dp.shutdown.register(_shutdown_wrapper)
 
     if s.use_webhook and s.webhook_url:
         app = web.Application()
         # webhook handler at /webhook
-        # aiogram expects path = webhook path; we use /webhook
         SimpleRequestHandler(dispatcher=dp, bot=bot, secret_token=s.webhook_secret).register(
             app, path="/webhook"
         )
         setup_application(app, dp, bot=bot)
-        # healthcheck
+        # healthchecks
         async def health(request):  # type: ignore
-            return web.json_response({"status": "ok"})
+            return web.json_response({"status": "ok", "bot": "online"})
+
+        async def health_detailed(request):  # type: ignore
+            # detailed health with DB/Redis checks
+            details = {"status": "ok"}
+            try:
+                from sqlalchemy import text as sa_text
+
+                from app.services.db import get_engine
+
+                engine = get_engine()
+                async with engine.connect() as conn:
+                    await conn.execute(sa_text("SELECT 1"))
+                details["db"] = "ok"
+            except Exception as e:
+                details["db"] = f"error: {e}"
+                details["status"] = "degraded"
+            try:
+                from app.services.redis import get_redis
+
+                r = await get_redis()
+                if r:
+                    await r.ping()
+                    details["redis"] = "ok"
+                else:
+                    details["redis"] = "disabled (in-memory fallback)"
+            except Exception as e:
+                details["redis"] = f"error: {e}"
+            status = 200 if details["status"] == "ok" else 503
+            return web.json_response(details, status=status)
+
         app.router.add_get("/health", health)
+        app.router.add_get("/healthz", health_detailed)
         return bot, dp, app
     return bot, dp, None
 
 
 async def polling_main():
-    s = get_settings()
+    get_settings()
     bot, dp, _ = build_app()
-    # background cleanup
-    asyncio.create_task(cleanup_loop())
+    # background cleanup with proper lifecycle
+    cleanup_task = asyncio.create_task(cleanup_loop())
     log.info("starting_polling")
-    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    try:
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    finally:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
+        await on_shutdown(bot)
 
 
 async def webhook_main():
     s = get_settings()
-    bot, dp, app = build_app()
+    bot, _dp, app = build_app()
     assert app is not None
-    # background cleanup
-    asyncio.create_task(cleanup_loop())
+    cleanup_task = asyncio.create_task(cleanup_loop())
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, host=s.webapp_host, port=s.webapp_port)
     log.info("starting_webhook", host=s.webapp_host, port=s.webapp_port, webhook=s.webhook_url)
     await site.start()
-    # keep alive
-    while True:
-        await asyncio.sleep(3600)
+    try:
+        while True:
+            await asyncio.sleep(3600)
+    finally:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
+        await runner.cleanup()
+        await on_shutdown(bot)
 
 
 def main():

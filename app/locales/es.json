@@ -1,0 +1,17 @@
+{
+  "start": "👋 <b>Descargador UniMedia</b>\n\nSolo envíame cualquier enlace de video — YouTube, TikTok, Instagram, X/Twitter, Facebook, Reddit, Vimeo, Twitch y más de 1000 sitios.\n\nDescargaré la mejor calidad al instante. Elige 1080p/720p/480p o Solo Audio.\n\n<i>Consejo: configura tu calidad por defecto en /settings</i>",
+  "help": "🆘 <b>Cómo usar</b>\n\n1. Envía un enlace (ej. https://youtu.be/...)\n2. Elige la calidad con los botones\n3. Recibe tu archivo — ¡archivos grandes hasta 2GB soportados!\n\n<b>Comandos</b>\n/start - bienvenida\n/help - este mensaje\n/settings - calidad por defecto e idioma\n/stats - estadísticas del bot",
+  "settings": "⚙️ <b>Ajustes</b>\nElige tu calidad por defecto. Se preseleccionará la próxima vez.",
+  "choose_quality": "🎯 <b>Elige calidad</b>\n\n{title}\n⏱ {duration} • 👤 {uploader}",
+  "downloading": "⬇️ Descargando… {pct} • {speed} • ETA {eta}",
+  "uploading": "⬆️ Subiendo a Telegram…",
+  "done": "✅ ¡Listo!",
+  "error": "❌ Falló: {err}\nPrueba otra calidad o envía el enlace otra vez.",
+  "rate_limited": "⏳ Demasiadas solicitudes. Espera {sec}s.",
+  "no_url": "🔍 No se detectó enlace. Envía una URL válida.",
+  "probing": "🔍 Analizando enlace…",
+  "settings_saved": "✅ Por defecto establecido a {val}",
+  "language_saved": "✅ Idioma establecido a {val}",
+  "queued": "⏳ En cola — el worker lo procesará en breve.",
+  "cancelled": "❌ Cancelado."
+}

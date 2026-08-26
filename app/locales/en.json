@@ -9,5 +9,9 @@
   "error": "❌ Failed: {err}\nTry another quality or send the link again.",
   "rate_limited": "⏳ Too many requests. Please wait {sec}s.",
   "no_url": "🔍 No link detected. Please send a valid video URL.",
-  "probing": "🔍 Probing link…"
+  "probing": "🔍 Probing link…",
+  "settings_saved": "✅ Default set to {val}",
+  "language_saved": "✅ Language set to {val}",
+  "queued": "⏳ Queued — worker will process shortly.",
+  "cancelled": "❌ Cancelled."
 }

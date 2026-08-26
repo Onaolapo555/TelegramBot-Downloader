@@ -20,8 +20,8 @@ def create_bot() -> Bot:
 
 
 def create_dispatcher() -> Dispatcher:
+    from app.bot.handlers import callback, url_handler
     from app.bot.handlers import start as start_h
-    from app.bot.handlers import url_handler, callback
 
     dp = Dispatcher()
     dp.include_router(start_h.router)

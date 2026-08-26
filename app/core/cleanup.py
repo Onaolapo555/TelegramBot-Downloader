@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from pathlib import Path
 
 from app.config import get_settings
 
@@ -47,10 +46,9 @@ def cleanup_sync() -> int:
         if p.name == ".gitkeep":
             continue
         try:
-            if now - p.stat().st_mtime > s.tmp_cleanup_seconds:
-                if p.is_file():
-                    p.unlink(missing_ok=True)
-                    deleted += 1
+            if now - p.stat().st_mtime > s.tmp_cleanup_seconds and p.is_file():
+                p.unlink(missing_ok=True)
+                deleted += 1
         except Exception:
             pass
     return deleted

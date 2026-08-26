@@ -3,7 +3,7 @@ from __future__ import annotations
 import html
 
 
-def human_bytes(num: int | float | None) -> str:
+def human_bytes(num: float | None) -> str:
     if num is None:
         return "unknown"
     num = float(num)
@@ -14,7 +14,7 @@ def human_bytes(num: int | float | None) -> str:
     return f"{num:.1f} TB"
 
 
-def human_duration(seconds: int | float | None) -> str:
+def human_duration(seconds: float | None) -> str:
     if seconds is None:
         return "unknown"
     s = int(seconds)
@@ -35,7 +35,7 @@ def format_caption(meta: dict, quality_label: str | None = None) -> str:
     views_str = f"{views:,}" if isinstance(views, int) else "—"
     ext = meta.get("ext") or "mp4"
     q = f" • {quality_label}" if quality_label else ""
-    source = html.escape((meta.get("extractor_key") or meta.get("extractor") or "unknown"))
+    source = html.escape(meta.get("extractor_key") or meta.get("extractor") or "unknown")
     url = meta.get("webpage_url") or meta.get("original_url") or ""
 
     lines = [

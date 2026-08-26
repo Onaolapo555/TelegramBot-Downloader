@@ -10,6 +10,10 @@ services:
     container_name: unimedia-bot
     env_file:
       - ../.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/unimedia
+      USE_QUEUE: "true"
     volumes:
       - ../data/downloads:/app/data/downloads
       - ../data/cookies:/app/data/cookies
@@ -24,15 +28,19 @@ services:
     #   - "8080:8080"
     restart: unless-stopped
 
-  # --- Worker (arq) - scale this! ---
+  # --- Worker (arq) - scale with: docker compose -f docker/docker-compose.yml up --scale worker=2 ---
   worker:
     build:
       context: ..
       dockerfile: docker/Dockerfile
     image: unimedia-bot:latest
-    container_name: unimedia-worker
     env_file:
       - ../.env
+    environment:
+      # Override .env defaults (localhost/sqlite) so containers talk to compose network
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/unimedia
+      USE_QUEUE: "true"
     volumes:
       - ../data/downloads:/app/data/downloads
       - ../data/cookies:/app/data/cookies
@@ -40,8 +48,6 @@ services:
       - redis
       - postgres
     command: arq app.workers.tasks.WorkerSettings
-    deploy:
-      replicas: 2
     restart: unless-stopped
 
   redis:

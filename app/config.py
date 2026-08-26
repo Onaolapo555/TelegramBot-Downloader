@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -35,6 +34,8 @@ class Settings(BaseSettings):
 
     # Redis
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
+    # Enable queue (arq) - set true in docker-compose where workers run; false for simple polling dev
+    use_queue: bool = Field(default=False, alias="USE_QUEUE")
 
     # DB
     database_url: str = Field(default="sqlite+aiosqlite:///./data/bot.db", alias="DATABASE_URL")

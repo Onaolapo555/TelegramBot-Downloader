@@ -1,0 +1,17 @@
+{
+  "start": "👋 <b>UniMedia Downloader</b>\n\nEnvoyez-moi simplement un lien vidéo — YouTube, TikTok, Instagram, X/Twitter, Facebook, Reddit, Vimeo, Twitch et 1000+ sites.\n\nJe récupère la meilleure qualité instantanément. Choisissez 1080p/720p/480p ou Audio seul.",
+  "help": "🆘 <b>Mode d'emploi</b>\n\n1. Envoyez un lien\n2. Choisissez la qualité\n3. Recevez votre fichier — jusqu'à 2GB supportés !",
+  "settings": "⚙️ <b>Paramètres</b>\nChoisissez votre qualité par défaut.",
+  "choose_quality": "🎯 <b>Choisissez la qualité</b>\n\n{title}",
+  "downloading": "⬇️ Téléchargement… {pct}",
+  "uploading": "⬆️ Envoi vers Telegram…",
+  "done": "✅ Terminé !",
+  "error": "❌ Échec : {err}",
+  "rate_limited": "⏳ Trop de requêtes. Attendez {sec}s.",
+  "no_url": "🔍 Aucun lien détecté.",
+  "probing": "🔍 Analyse du lien…",
+  "settings_saved": "✅ Qualité par défaut réglée à {val}",
+  "language_saved": "✅ Langue réglée à {val}",
+  "queued": "⏳ En file d'attente — le worker va traiter bientôt.",
+  "cancelled": "❌ Annulé."
+}

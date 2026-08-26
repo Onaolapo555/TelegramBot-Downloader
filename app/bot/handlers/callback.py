@@ -5,15 +5,18 @@ import html
 import logging
 from pathlib import Path
 
-from aiogram import Router, F
-from aiogram.types import CallbackQuery, FSInputFile
+from aiogram import F, Router
+from aiogram.types import CallbackQuery
 
-from app.bot.keyboards.inline import get_cached_url
+from app.bot.keyboards.inline import get_cached_url_async
 from app.config import get_settings
-from app.core.downloader import download_media, Quality
-from app.core.uploader import smart_send
-from app.utils.format import format_caption, human_bytes
+from app.core.downloader import Quality, download_media
 from app.core.metadata import probe_metadata
+from app.core.uploader import smart_send
+from app.services.job_service import create_job, update_job_status
+from app.services.redis import enqueue_download, incr_stat
+from app.services.user_service import increment_download_count
+from app.utils.format import format_caption, human_bytes
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -47,7 +50,12 @@ async def cb_download(callback: CallbackQuery, lang: str = "en"):
             pass
         return
 
-    url = get_cached_url(h)
+    url = await get_cached_url_async(h)
+    # also try sync fallback
+    if not url:
+        from app.bot.keyboards.inline import get_cached_url as sync_get
+
+        url = sync_get(h)
     if not url:
         await callback.answer("Link expired — please send the URL again.", show_alert=True)
         return
@@ -56,20 +64,61 @@ async def cb_download(callback: CallbackQuery, lang: str = "en"):
 
     await callback.answer(f"Downloading {qual_key}…")
 
-    # Edit message to show progress stub
+    # Create job record for tracking / stats
+    job = None
     try:
-        await callback.message.edit_text(f"⬇️ Downloading <b>{qual_key}</b>…\n<code>{html.escape(url[:120])}</code>\n\n<i>Preparing…</i>")
+        job = await create_job(callback.from_user.id, callback.message.chat.id, url, qual_key)  # type: ignore
+        await incr_stat("jobs_created")
+    except Exception as e:
+        log.debug("create_job failed: %s", e)
+
+    # Edit message to show queue/preparing status
+    try:
+        await callback.message.edit_text(  # type: ignore
+            f"⬇️ Downloading <b>{qual_key}</b>…\n<code>{html.escape(url[:120])}</code>\n\n<i>Preparing…</i>"
+        )
     except Exception:
         pass
 
-    # For production with Redis queue, enqueue here:
-    # await arq_pool.enqueue_job("download_job", url, quality, callback.message.chat.id, callback.message.message_id, callback.from_user.id)
-    # Instead for MVP we download inline in background task so we can reply quickly
-    asyncio.create_task(_do_download(callback, url, quality))
-
-
-async def _do_download(callback: CallbackQuery, url: str, quality: Quality):
+    # Try enqueue to Redis worker if queue enabled; otherwise fallback to direct download
     s = get_settings()
+    status_msg_id = callback.message.message_id  # type: ignore
+    chat_id = callback.message.chat.id  # type: ignore
+
+    enqueued = False
+    if s.use_queue:
+        try:
+            enqueued = await asyncio.wait_for(
+                enqueue_download(url, quality, chat_id, status_msg_id, callback.from_user.id),
+                timeout=3.0,
+            )
+        except TimeoutError:
+            log.warning("enqueue timeout, fallback to direct")
+            enqueued = False
+        except Exception as e:
+            log.debug("enqueue check failed: %s", e)
+            enqueued = False
+
+        if enqueued:
+            try:
+                await callback.message.edit_text(  # type: ignore
+                    f"⏳ <b>Queued</b> ({qual_key})\n<code>{html.escape(url[:80])}</code>\n\nWorker will process shortly. You'll receive the file here."
+                )
+            except Exception:
+                pass
+            if job:
+                try:
+                    await update_job_status(job.id, "queued")
+                except Exception:
+                    pass
+            return
+
+    # Fallback: direct download in background task (queue disabled or Redis down)
+    asyncio.create_task(_do_download(callback, url, quality, job_id=job.id if job else None))
+
+
+async def _do_download(callback: CallbackQuery, url: str, quality: Quality, job_id: int | None = None):
+    get_settings()
     chat_id = callback.message.chat.id  # type: ignore
     bot = callback.bot
 
@@ -116,10 +165,20 @@ async def _do_download(callback: CallbackQuery, url: str, quality: Quality):
 
     filepath: Path | None = None
     try:
+        if job_id:
+            try:
+                await update_job_status(job_id, "downloading")
+            except Exception:
+                pass
         # download (blocking -> run in thread)
         filepath = await asyncio.to_thread(download_media, url, quality, progress_hook)
 
         await _safe_edit(status_msg, "⬆️ <b>Uploading to Telegram…</b>")
+        if job_id:
+            try:
+                await update_job_status(job_id, "uploading", file_path=str(filepath))
+            except Exception:
+                pass
 
         # Determine caption
         caption = format_caption(meta, quality_label=qual_key_label(quality))
@@ -128,6 +187,16 @@ async def _do_download(callback: CallbackQuery, url: str, quality: Quality):
         await smart_send(bot, chat_id, filepath, caption, meta)
 
         await _safe_edit(status_msg, "✅ <b>Done!</b> File delivered above ☝️")
+        if job_id:
+            try:
+                await update_job_status(job_id, "done")
+            except Exception:
+                pass
+        try:
+            await increment_download_count(callback.from_user.id)
+            await incr_stat("downloads_success")
+        except Exception:
+            pass
         # auto delete status after 10s
         await asyncio.sleep(10)
         try:
@@ -138,6 +207,12 @@ async def _do_download(callback: CallbackQuery, url: str, quality: Quality):
     except Exception as e:
         log.exception("download failed %s %s", url, quality)
         err = html.escape(str(e)[:900])
+        if job_id:
+            try:
+                await update_job_status(job_id, "failed", error=str(e)[:2000])
+                await incr_stat("downloads_failed")
+            except Exception:
+                pass
         try:
             await status_msg.edit_text(f"❌ <b>Failed</b> ({html.escape(quality)}):\n<code>{err}</code>\n\nTry another quality or send link again.")
         except Exception:
