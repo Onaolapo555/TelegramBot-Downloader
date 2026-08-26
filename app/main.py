@@ -46,6 +46,41 @@ def setup_logging():
             log.warning("sentry_init_failed", error=str(e))
 
 
+async def _ytdlp_update_loop(interval_hours: int):
+    """Periodic yt-dlp updater — keeps bot working as yt-dlp fixes Twitter/IG etc."""
+    import subprocess
+    import sys
+
+    interval = max(1, interval_hours) * 3600
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            log.info("ytdlp_periodic_update_check")
+            for args in (
+                [sys.executable, "-m", "pip", "install", "-U", "yt-dlp", "--no-cache-dir", "-q"],
+                [sys.executable, "-m", "pip", "install", "-U", "yt-dlp", "--no-cache-dir", "-q", "--user"],
+            ):
+                res = subprocess.run(args, timeout=90, capture_output=True)
+                if res.returncode == 0:
+                    break
+                err = res.stderr.decode().lower() if res.stderr else ""
+                if "permission" not in err and "could not install" not in err:
+                    break
+            if res.returncode == 0:
+                try:
+                    import importlib
+                    import yt_dlp
+
+                    importlib.reload(yt_dlp)
+                    log.info("ytdlp_periodic_update_done", version=getattr(yt_dlp.version, "__version__", "unknown"))
+                except Exception:
+                    pass
+            else:
+                log.warning("ytdlp_periodic_update_failed", returncode=res.returncode)
+        except Exception as e:
+            log.warning("ytdlp_periodic_update_error", error=str(e))
+
+
 async def on_startup(bot: Bot):
     s = get_settings()
     # init DB
@@ -80,25 +115,51 @@ async def on_startup(bot: Bot):
         await bot.delete_webhook(drop_pending_updates=True)
         log.info("polling_mode - webhook deleted")
 
-    # yt-dlp version + optional auto-update (Phase-5)
+    # yt-dlp version + auto-update (Phase-5 fix: always fresh)
     try:
         import yt_dlp
+
         log.info("yt_dlp_version", version=yt_dlp.version.__version__)
         if s.ytdlp_auto_update:
+            # Run update - handles docker bot user permission via --user fallback
             try:
                 import subprocess
                 import sys
 
                 log.info("ytdlp_auto_update_start")
-                subprocess.run([sys.executable, "-m", "pip", "install", "-U", "yt-dlp", "-q"], timeout=60)
-                import importlib
+                for args in (
+                    [sys.executable, "-m", "pip", "install", "-U", "yt-dlp", "--no-cache-dir", "-q"],
+                    [sys.executable, "-m", "pip", "install", "-U", "yt-dlp", "--no-cache-dir", "-q", "--user"],
+                ):
+                    res = subprocess.run(args, timeout=90, capture_output=True)
+                    if res.returncode == 0:
+                        break
+                    # If permission error, try --user next iteration
+                    err = res.stderr.decode().lower() if res.stderr else ""
+                    if "permission" not in err and "could not install" not in err:
+                        break
+                if res.returncode == 0:
+                    import importlib
 
-                importlib.reload(yt_dlp)
-                log.info("ytdlp_auto_update_done", version=yt_dlp.version.__version__)
+                    try:
+                        importlib.reload(yt_dlp)
+                    except Exception:
+                        pass
+                    log.info("ytdlp_auto_update_done", version=getattr(yt_dlp.version, "__version__", "unknown"))
+                else:
+                    log.warning("ytdlp_auto_update_failed", stderr=res.stderr.decode()[:200] if res.stderr else "unknown")
             except Exception as e:
                 log.warning("ytdlp_auto_update_failed", error=str(e))
     except Exception:
         pass
+
+    # Start periodic auto-update loop (every N hours) if enabled
+    if s.ytdlp_auto_update:
+        try:
+            asyncio.create_task(_ytdlp_update_loop(s.ytdlp_auto_update_interval_hours))
+            log.info("ytdlp_auto_update_loop_started", interval_hours=s.ytdlp_auto_update_interval_hours)
+        except Exception as e:
+            log.warning("ytdlp_loop_start_failed", error=str(e))
 
 
 async def on_shutdown(bot: Bot):

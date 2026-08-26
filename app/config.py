@@ -74,7 +74,8 @@ class Settings(BaseSettings):
     enable_subtitles: bool = Field(default=False, alias="ENABLE_SUBTITLES")
     subtitle_langs: str = Field(default="en", alias="SUBTITLE_LANGS")  # comma sep e.g. "en,hi"
     ytdlp_proxy: str | None = Field(default=None, alias="YTDLP_PROXY")
-    ytdlp_auto_update: bool = Field(default=False, alias="YTDLP_AUTO_UPDATE")
+    ytdlp_auto_update: bool = Field(default=True, alias="YTDLP_AUTO_UPDATE")  # Phase-5 fix: always keep yt-dlp fresh
+    ytdlp_auto_update_interval_hours: int = Field(default=6, alias="YTDLP_AUTO_UPDATE_INTERVAL_HOURS")
 
     # Phase-5.1: Insane speed tuning (yt-dlp native + aria2c chunking)
     use_aria2: bool = Field(default=True, alias="USE_ARIA2")

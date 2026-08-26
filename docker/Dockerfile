@@ -20,8 +20,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -e . && \
     yt-dlp --version
 
-# non-root
-RUN useradd -m bot && chown -R bot:bot /app
+# non-root + allow bot to auto-update yt-dlp inside container
+RUN useradd -m bot && chown -R bot:bot /app && chmod -R a+w /usr/local/lib/python3.11/site-packages || true
 USER bot
 
 CMD ["python", "-m", "app.main", "--polling"]
