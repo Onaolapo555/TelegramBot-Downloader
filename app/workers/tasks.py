@@ -174,7 +174,8 @@ class WorkerSettings:
     max_jobs = get_settings().max_concurrent_downloads * 2
     job_timeout = 3600  # 1h per download (for big files)
 
-    async def startup(self, ctx: dict):
+    @staticmethod
+    async def startup(ctx: dict):
         # Create bot for worker process
         from app.bot import create_bot
         from app.services.db import init_db
@@ -186,7 +187,8 @@ class WorkerSettings:
             log.warning("worker db init failed: %s", e)
         log.info("arq worker startup - bot created, db ready")
 
-    async def shutdown(self, ctx: dict):
+    @staticmethod
+    async def shutdown(ctx: dict):
         bot = ctx.get("bot")
         if bot:
             await bot.session.close()

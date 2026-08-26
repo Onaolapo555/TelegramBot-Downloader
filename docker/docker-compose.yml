@@ -13,7 +13,7 @@ services:
     environment:
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/unimedia
-      USE_QUEUE: "true"
+      USE_QUEUE: "false"  # Phase-1 instant direct download (fast for <100MB). Set "true" to enable Redis queue for large-scale / 2GB via workers.
     volumes:
       - ../data/downloads:/app/data/downloads
       - ../data/cookies:/app/data/cookies
