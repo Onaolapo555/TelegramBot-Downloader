@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import shutil
+import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -11,6 +13,9 @@ import yt_dlp
 from app.config import get_settings
 
 log = logging.getLogger(__name__)
+
+# In-memory probe cache for insane preparing speed (url+quality -> meta)
+_PROBE_CACHE: dict[str, tuple[dict, float]] = {}
 
 Quality = Literal["best", "1080", "720", "480", "360", "audio_mp3", "audio_m4a"]
 
@@ -126,6 +131,27 @@ def _resolve_cookiefile(url: str | None = None) -> str | None:
     return None
 
 
+def _get_probe_cache(url: str, quality: str | None = None) -> dict | None:
+    key = f"{url}::{quality or ''}"
+    entry = _PROBE_CACHE.get(key)
+    if entry:
+        meta, exp = entry
+        if time.monotonic() < exp:
+            return meta
+        _PROBE_CACHE.pop(key, None)
+    return None
+
+
+def _set_probe_cache(url: str, meta: dict, quality: str | None = None, ttl: int | None = None):
+    if ttl is None:
+        try:
+            ttl = get_settings().probe_cache_ttl
+        except Exception:
+            ttl = 900
+    key = f"{url}::{quality or ''}"
+    _PROBE_CACHE[key] = (meta, time.monotonic() + ttl)
+
+
 def build_ydl_opts(
     quality: Quality,
     outtmpl: str,
@@ -136,6 +162,9 @@ def build_ydl_opts(
 ) -> dict:
     s = get_settings()
     fmt = FORMAT_MAP.get(quality, FORMAT_MAP["best"])
+    # Fast mode override: skip thumbnail for max speed if configured
+    if s.fast_mode:
+        no_thumb = True
 
     opts: dict = {
         "format": fmt,
@@ -144,7 +173,7 @@ def build_ydl_opts(
         "noplaylist": not s.allow_playlist,
         "quiet": True,
         "no_warnings": True,
-        # Speed / reliability (AGENTS.md 2.4): max concurrent fragments + retries
+        # Insane speed tuning: yt-dlp native chunking + aria2c for http
         "concurrent_fragment_downloads": 16,
         "buffersize": 1024 * 1024,
         "http_chunk_size": 10 * 1024 * 1024,
@@ -155,10 +184,31 @@ def build_ydl_opts(
         "progress_hooks": [progress_hook] if progress_hook else [],
         "noprogress": False,
         "prefer_free_formats": False,
-        # Improve fragment retry & skip unavailable
         "skip_unavailable_fragments": True,
         "keepvideo": False,
+        # Exact yt-dlp fast approach: prefer h264/aac mp4, avoid re-encode
+        "format_sort": ["res", "fps", "codec:h264", "size", "br"],
+        "postprocessor_args": {
+            "ffmpeg": ["-hwaccel", "auto"]  # use hwaccel if available for merge speed
+        }
+        if not s.fast_mode
+        else {},
     }
+    # Remove empty dict postprocessor_args if fast
+    if not opts.get("postprocessor_args"):
+        opts.pop("postprocessor_args", None)
+
+    # aria2c external downloader - insanely fast multi-connection for http (non-HLS)
+    # yt-dlp will use aria2c if available and for http/https protocols
+    if s.use_aria2 and shutil.which("aria2c"):
+        max_conn = max(1, min(32, s.aria2c_max_connections))
+        opts["external_downloader"] = "aria2c"
+        opts["external_downloader_args"] = {
+            "http": ["-x", str(max_conn), "-s", str(max_conn), "-k", "1M", "--file-allocation=none", "--async-dns=false"],
+            "https": ["-x", str(max_conn), "-s", str(max_conn), "-k", "1M", "--file-allocation=none", "--async-dns=false"],
+        }
+        # For HLS/DASH, yt-dlp still uses concurrent_fragment_downloads; aria2c handles direct http
+        # Ensure we still keep fragment concurrency
 
     # remove None values (yt-dlp doesn't like None for merge_output_format)
     opts = {k: v for k, v in opts.items() if v is not None}

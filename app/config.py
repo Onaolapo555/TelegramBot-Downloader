@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     ytdlp_proxy: str | None = Field(default=None, alias="YTDLP_PROXY")
     ytdlp_auto_update: bool = Field(default=False, alias="YTDLP_AUTO_UPDATE")
 
+    # Phase-5.1: Insane speed tuning (yt-dlp native + aria2c chunking)
+    use_aria2: bool = Field(default=True, alias="USE_ARIA2")
+    fast_mode: bool = Field(default=True, alias="FAST_MODE")  # skip thumbnail embedding for max speed
+    probe_cache_ttl: int = Field(default=900, alias="PROBE_CACHE_TTL")  # 15 min
+    aria2c_max_connections: int = Field(default=16, alias="ARIA2C_MAX_CONNECTIONS")
+
     @field_validator("admin_user_ids", mode="before")
     @classmethod
     def _parse_admin_ids(cls, v):

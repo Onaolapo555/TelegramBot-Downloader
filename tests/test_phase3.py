@@ -58,19 +58,31 @@ def test_auto_downgrade_large():
 
 
 def test_build_ydl_opts_phase3_speed():
+    from app.config import get_settings
     from app.core.downloader import build_ydl_opts
 
-    opts = build_ydl_opts("best", "/tmp/%(id)s.%(ext)s")
-    assert opts["concurrent_fragment_downloads"] == 16
-    assert opts["retries"] == 10
-    assert opts["fragment_retries"] == 10
-    assert opts["extractor_retries"] == 3
-    assert opts["skip_unavailable_fragments"] is True
-    # Thumbnail should be enabled for video
-    assert opts.get("writethumbnail") is True
-    # Audio should also have thumbnail
-    opts_audio = build_ydl_opts("audio_mp3", "/tmp/%(id)s.%(ext)s")
-    assert opts_audio.get("writethumbnail") is True
+    # Fast mode disables thumbnail for insane speed, so test with fast_mode False
+    s = get_settings()
+    orig_fast = s.fast_mode
+    try:
+        s.fast_mode = False
+        opts = build_ydl_opts("best", "/tmp/%(id)s.%(ext)s")
+        assert opts["concurrent_fragment_downloads"] == 16
+        assert opts["retries"] == 10
+        assert opts["fragment_retries"] == 10
+        assert opts["extractor_retries"] == 3
+        assert opts["skip_unavailable_fragments"] is True
+        # Thumbnail should be enabled for video when fast_mode False
+        assert opts.get("writethumbnail") is True
+        # Audio should also have thumbnail
+        opts_audio = build_ydl_opts("audio_mp3", "/tmp/%(id)s.%(ext)s")
+        assert opts_audio.get("writethumbnail") is True
+        # When fast_mode True, thumbnail skipped for speed
+        s.fast_mode = True
+        opts_fast = build_ydl_opts("best", "/tmp/%(id)s.%(ext)s")
+        assert opts_fast.get("writethumbnail") is not True  # None or False
+    finally:
+        s.fast_mode = orig_fast
 
 
 def test_format_caption_with_filesize():
