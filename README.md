@@ -65,10 +65,23 @@ Telegram -> [aiogram Bot (webhook/polling)] -> Redis (arq queue) -> Workers (yt-
 - `/start` - welcome + prefs
 - `/help` - how to use
 - `/settings` - default quality / audio
+- `/language` - change language
 - `/stats` - bot stats
+- `/admin` - admin panel (requires `ADMIN_USER_IDS`)
+- `/donate` - support link
+- `/broadcast` - admin broadcast (with `ADMIN_USER_IDS`)
+
+## Phase-5 (Observability & Ops) — New
+
+- Metrics: `ENABLE_METRICS=true` exposes `/metrics` (Prometheus `text/plain` or JSON), `/health`/`/healthz` even in polling mode (`app/main.py:177`), includes `users`, `jobs_total/done/failed/queued`, `redis_success/failed`, `disk_free_mb` (`app/main.py:202`). Protect `/metrics` via Nginx `allow 127.0.0.1; deny all;` `docker/nginx.conf.example:19`.
+- Sentry: `SENTRY_DSN` optional (`app/main.py:35` via `sentry-sdk` if installed, `traces_sample_rate=0.1`), structured `structlog` JSON in webhook mode.
+- `yt-dlp` auto-update: `YTDLP_AUTO_UPDATE=true` runs `pip install -U yt-dlp` on `on_startup` (`app/main.py:74`), version logged.
+- Per-domain cookies `data/cookies/{youtube,instagram,tiktok,twitter,facebook}.txt` + generic `cookies.txt` (`app/core/downloader.py:90` `_resolve_cookiefile`), proxy `YTDLP_PROXY=http://proxy:8080` (`app/core/downloader.py:167`), subtitles `ENABLE_SUBTITLES=true` + `SUBTITLE_LANGS=en,hi` (`writesubtitles/writeautomaticsub`).
+- Webhook Nginx TLS example `docker/nginx.conf.example:1`, `Makefile` `docker-local`/`docker-scale`/`docker-logs`.
 
 ## Notes
 
 - R2 fallback auto-uploads files >2GB and returns expiring link
 - Files are deleted from `data/downloads` after 10min (configurable)
-- `yt-dlp` is updated on container start; mount `data/cookies` for IG/TikTok if needed
+- `yt-dlp` is updated on container start if `YTDLP_AUTO_UPDATE=true`; mount `data/cookies` for IG/TikTok if needed (per-domain supported)
+- Cookies: put `youtube.txt` etc in `data/cookies/` — see `app/core/downloader.py:90` and `app/core/metadata.py:25`

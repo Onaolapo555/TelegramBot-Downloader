@@ -24,6 +24,14 @@ def create_dispatcher() -> Dispatcher:
     from app.bot.handlers import start as start_h
 
     dp = Dispatcher()
+    # Phase-5: allow re-creation in tests (routers are singletons, may be already attached)
+    for r in (start_h.router, admin.router, url_handler.router, callback.router):
+        try:
+            # Reset parent if already attached to previous Dispatcher (tests call build_app multiple times)
+            if getattr(r, "_parent_router", None) is not None:
+                r._parent_router = None  # type: ignore
+        except Exception:
+            pass
     dp.include_router(start_h.router)
     dp.include_router(admin.router)
     dp.include_router(url_handler.router)

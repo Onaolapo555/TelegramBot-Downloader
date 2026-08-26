@@ -33,6 +33,17 @@ def setup_logging():
         ],
         wrapper_class=structlog.make_filtering_bound_logger(level),
     )
+    # Sentry (Phase-5 observability) — optional, no extra dep required; uses stdlib if DSN set
+    if s.sentry_dsn:
+        try:
+            import sentry_sdk  # type: ignore
+
+            sentry_sdk.init(dsn=s.sentry_dsn, traces_sample_rate=0.1)
+            log.info("sentry_enabled")
+        except ImportError:
+            log.warning("sentry_dsn set but sentry-sdk not installed — pip install sentry-sdk")
+        except Exception as e:
+            log.warning("sentry_init_failed", error=str(e))
 
 
 async def on_startup(bot: Bot):
@@ -69,10 +80,23 @@ async def on_startup(bot: Bot):
         await bot.delete_webhook(drop_pending_updates=True)
         log.info("polling_mode - webhook deleted")
 
-    # update yt-dlp? (optional - log version)
+    # yt-dlp version + optional auto-update (Phase-5)
     try:
         import yt_dlp
         log.info("yt_dlp_version", version=yt_dlp.version.__version__)
+        if s.ytdlp_auto_update:
+            try:
+                import subprocess
+                import sys
+
+                log.info("ytdlp_auto_update_start")
+                subprocess.run([sys.executable, "-m", "pip", "install", "-U", "yt-dlp", "-q"], timeout=60)
+                import importlib
+
+                importlib.reload(yt_dlp)
+                log.info("ytdlp_auto_update_done", version=yt_dlp.version.__version__)
+            except Exception as e:
+                log.warning("ytdlp_auto_update_failed", error=str(e))
     except Exception:
         pass
 
@@ -113,19 +137,16 @@ def build_app() -> tuple[Bot, Dispatcher, web.Application | None]:
     dp.startup.register(_startup_wrapper)
     dp.shutdown.register(_shutdown_wrapper)
 
-    if s.use_webhook and s.webhook_url:
-        app = web.Application()
-        # webhook handler at /webhook
-        SimpleRequestHandler(dispatcher=dp, bot=bot, secret_token=s.webhook_secret).register(
-            app, path="/webhook"
-        )
-        setup_application(app, dp, bot=bot)
-        # healthchecks
+    # Build aiohttp app for webhook OR for metrics/health even in polling mode (Phase-5)
+    # Metrics/health are always registered if enable_metrics, so polling deploy can still be monitored
+    metrics_app: web.Application | None = None
+    if s.enable_metrics or (s.use_webhook and s.webhook_url):
+        metrics_app = web.Application()
+        # health
         async def health(request):  # type: ignore
             return web.json_response({"status": "ok", "bot": "online"})
 
         async def health_detailed(request):  # type: ignore
-            # detailed health with DB/Redis checks
             details = {"status": "ok"}
             try:
                 from sqlalchemy import text as sa_text
@@ -153,17 +174,92 @@ def build_app() -> tuple[Bot, Dispatcher, web.Application | None]:
             status = 200 if details["status"] == "ok" else 503
             return web.json_response(details, status=status)
 
-        app.router.add_get("/health", health)
-        app.router.add_get("/healthz", health_detailed)
+        # Prometheus-style metrics (Phase-5 observability)
+        async def metrics(request):  # type: ignore
+            # JSON metrics + Prometheus text fallback via Accept header
+            try:
+                from app.services.job_service import count_jobs, total_jobs
+                from app.services.redis import get_stat
+                from app.services.user_service import count_users, total_downloads
+
+                users = await count_users()
+                downloads = await total_downloads()
+                jobs_total = await total_jobs()
+                jobs_done = await count_jobs("done")
+                jobs_failed = await count_jobs("failed")
+                jobs_queued = await count_jobs("queued")
+                redis_success = await get_stat("downloads_success")
+                redis_failed = await get_stat("downloads_failed")
+                # disk usage of download dir
+                try:
+                    import shutil
+
+                    du = shutil.disk_usage(str(s.download_dir))
+                    disk_free_mb = du.free // (1024 * 1024)
+                    disk_total_mb = du.total // (1024 * 1024)
+                except Exception:
+                    disk_free_mb = disk_total_mb = 0
+                data = {
+                    "users": users,
+                    "downloads_db": downloads,
+                    "jobs_total": jobs_total,
+                    "jobs_done": jobs_done,
+                    "jobs_failed": jobs_failed,
+                    "jobs_queued": jobs_queued,
+                    "redis_success": redis_success,
+                    "redis_failed": redis_failed,
+                    "disk_free_mb": disk_free_mb,
+                    "disk_total_mb": disk_total_mb,
+                    "threshold_bytes": s.large_file_threshold_bytes,
+                }
+                # If Prometheus requested, render text
+                accept = request.headers.get("Accept", "")
+                if "text/plain" in accept:
+                    lines = []
+                    for k, v in data.items():
+                        lines.append(f"# HELP unimedia_{k} {k}")
+                        lines.append(f"# TYPE unimedia_{k} gauge")
+                        lines.append(f"unimedia_{k} {v}")
+                    return web.Response(text="\n".join(lines), content_type="text/plain")
+                return web.json_response(data)
+            except Exception as e:
+                return web.json_response({"error": str(e)}, status=500)
+
+        metrics_app.router.add_get("/health", health)
+        metrics_app.router.add_get("/healthz", health_detailed)
+        if s.enable_metrics:
+            metrics_app.router.add_get("/metrics", metrics)
+
+    if s.use_webhook and s.webhook_url:
+        app = metrics_app or web.Application()
+        SimpleRequestHandler(dispatcher=dp, bot=bot, secret_token=s.webhook_secret).register(
+            app, path="/webhook"
+        )
+        setup_application(app, dp, bot=bot)
+        # If metrics_app was separate and we created new app, need to add health/metrics there too
+        # Already added if metrics_app was reused; if not, add now
         return bot, dp, app
-    return bot, dp, None
+    # Polling mode: if metrics enabled, return metrics_app for background serving
+    return bot, dp, metrics_app
 
 
 async def polling_main():
-    get_settings()
-    bot, dp, _ = build_app()
+    s = get_settings()
+    bot, dp, metrics_app = build_app()
     # background cleanup with proper lifecycle
     cleanup_task = asyncio.create_task(cleanup_loop())
+    # metrics server (Phase-5) — even in polling mode, expose /health /metrics
+    metrics_runner = None
+    if metrics_app is not None:
+        try:
+            metrics_runner = web.AppRunner(metrics_app)
+            await metrics_runner.setup()
+            site = web.TCPSite(metrics_runner, host=s.webapp_host, port=s.webapp_port)
+            await site.start()
+            log.info("metrics_server_started", host=s.webapp_host, port=s.webapp_port)
+        except OSError as e:
+            log.warning("metrics_server_failed", error=str(e))
+            metrics_runner = None
     log.info("starting_polling")
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
@@ -173,6 +269,11 @@ async def polling_main():
             await cleanup_task
         except asyncio.CancelledError:
             pass
+        if metrics_runner:
+            try:
+                await metrics_runner.cleanup()
+            except Exception:
+                pass
         await on_shutdown(bot)
 
 

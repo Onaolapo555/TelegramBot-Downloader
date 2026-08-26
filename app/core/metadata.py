@@ -19,8 +19,19 @@ async def probe_metadata(url: str) -> dict[str, Any]:
         "skip_download": True,
         "socket_timeout": 15,
     }
-    # Optional cookies: if cookies.txt exists in COOKIES_DIR, yt-dlp can use it
-    # For now, let yt-dlp auto-discover; advanced: pass cookiefile per domain
+    # Phase-5: per-domain cookies + proxy + playlist limit
+    try:
+        from app.core.downloader import _resolve_cookiefile
+
+        cf = _resolve_cookiefile(url=url)
+        if cf:
+            opts["cookiefile"] = cf
+    except Exception:
+        pass
+    if s.ytdlp_proxy:
+        opts["proxy"] = s.ytdlp_proxy
+    if s.allow_playlist:
+        opts["playlistend"] = s.playlist_max_items
 
     def _probe():
         with yt_dlp.YoutubeDL(opts) as ydl:

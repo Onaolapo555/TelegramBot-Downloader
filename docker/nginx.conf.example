@@ -1,0 +1,50 @@
+# Nginx reverse proxy for UniMedia webhook mode (Phase-5)
+# Place as /etc/nginx/sites-available/unimedia -> symlink to sites-enabled
+# Requires certbot TLS: certbot --nginx -d yourdomain.com
+
+upstream unimedia_bot {
+    server 127.0.0.1:8080;
+}
+
+server {
+    listen 80;
+    server_name yourdomain.com;
+
+    # Redirect to HTTPS (handled by certbot after running)
+    # location / { return 301 https://$host$request_uri; }
+
+    location /webhook {
+        proxy_pass http://unimedia_bot/webhook;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Telegram needs fast response, increase timeouts for large uploads via Local API
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+        client_max_body_size 0; # unlimited for webhook updates
+        # Validate secret token
+        proxy_set_header X-Telegram-Bot-Api-Secret-Token $http_x_telegram_bot_api_secret_token;
+    }
+
+    location /health { proxy_pass http://unimedia_bot/health; }
+    location /healthz { proxy_pass http://unimedia_bot/healthz; }
+    location /metrics {
+        proxy_pass http://unimedia_bot/metrics;
+        # Protect metrics — allow only internal/VPN
+        allow 127.0.0.1;
+        allow 10.0.0.0/8;
+        deny all;
+    }
+}
+
+# HTTPS server (certbot will generate)
+# server {
+#     listen 443 ssl http2;
+#     server_name yourdomain.com;
+#     ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
+#     ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
+#     location /webhook { proxy_pass http://unimedia_bot/webhook; proxy_set_header Host $host; ... }
+#     location /health { proxy_pass http://unimedia_bot/health; }
+#     location /metrics { proxy_pass http://unimedia_bot/metrics; allow 127.0.0.1; deny all; }
+# }

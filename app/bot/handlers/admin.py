@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import html
 
-from aiogram import Router, F
+from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
@@ -78,9 +78,10 @@ async def cmd_broadcast(message: Message):
         return
     broadcast_text = payload[1].strip()
     # Load all user ids
-    from app.services.db import get_session_factory
-    from app.models.user import User
     from sqlalchemy import select
+
+    from app.models.user import User
+    from app.services.db import get_session_factory
 
     factory = get_session_factory()
     async with factory() as session:

@@ -68,6 +68,14 @@ class Settings(BaseSettings):
     donate_url: str | None = Field(default=None, alias="DONATE_URL")
     donate_text: str = Field(default="❤️ Support UniMedia — keep the fastest downloader alive!", alias="DONATE_TEXT")
 
+    # Phase-5: Observability & advanced
+    sentry_dsn: str | None = Field(default=None, alias="SENTRY_DSN")
+    enable_metrics: bool = Field(default=True, alias="ENABLE_METRICS")
+    enable_subtitles: bool = Field(default=False, alias="ENABLE_SUBTITLES")
+    subtitle_langs: str = Field(default="en", alias="SUBTITLE_LANGS")  # comma sep e.g. "en,hi"
+    ytdlp_proxy: str | None = Field(default=None, alias="YTDLP_PROXY")
+    ytdlp_auto_update: bool = Field(default=False, alias="YTDLP_AUTO_UPDATE")
+
     @field_validator("admin_user_ids", mode="before")
     @classmethod
     def _parse_admin_ids(cls, v):

@@ -87,12 +87,52 @@ def auto_downgrade_quality(meta: dict, requested: Quality, limit_bytes: int | No
     return order[-1]  # ultimate fallback audio
 
 
+def _resolve_cookiefile(url: str | None = None) -> str | None:
+    """Phase-5: per-domain cookiefile resolution. Checks generic then domain-specific."""
+    s = get_settings()
+    # 1. Generic
+    generic = s.cookies_dir / "cookies.txt"
+    if generic.exists():
+        return str(generic)
+    if not url:
+        return None
+    # 2. Domain-specific: e.g., youtube.txt, instagram.txt, tiktok.txt
+    try:
+        from urllib.parse import urlparse
+
+        netloc = urlparse(url).netloc.lower().lstrip("www.")
+        # Map known domains to cookie files
+        domain_map = {
+            "youtube.com": "youtube.txt",
+            "youtu.be": "youtube.txt",
+            "instagram.com": "instagram.txt",
+            "tiktok.com": "tiktok.txt",
+            "twitter.com": "twitter.txt",
+            "x.com": "twitter.txt",
+            "facebook.com": "facebook.txt",
+            "fb.watch": "facebook.txt",
+        }
+        for dom, fname in domain_map.items():
+            if netloc == dom or netloc.endswith("." + dom):
+                cand = s.cookies_dir / fname
+                if cand.exists():
+                    return str(cand)
+        # Fallback: try <netloc>.txt
+        cand = s.cookies_dir / f"{netloc.split('.')[0]}.txt"
+        if cand.exists():
+            return str(cand)
+    except Exception:
+        pass
+    return None
+
+
 def build_ydl_opts(
     quality: Quality,
     outtmpl: str,
     progress_hook: Callable[[dict], None] | None = None,
     *,
     no_thumb: bool = False,
+    url: str | None = None,
 ) -> dict:
     s = get_settings()
     fmt = FORMAT_MAP.get(quality, FORMAT_MAP["best"])
@@ -158,15 +198,22 @@ def build_ydl_opts(
             # We add EmbedThumbnail postprocessor; if ffmpeg has no image, it will warn but not fail
             opts["postprocessors"].append({"key": "EmbedThumbnail", "already_have_thumbnail": False})
 
-        # Optional subtitle handling: download auto subs if available (not burned)
-        # Controlled via env later; for Phase-3 we enable metadata but not hard burn
-        # Users can request via quality param "subs" in future; keep off by default to save speed
+        # Optional subtitle handling (Phase-5) — respects ENABLE_SUBTITLES
+        if s.enable_subtitles:
+            langs = [x.strip() for x in s.subtitle_langs.split(",") if x.strip()]
+            opts["writesubtitles"] = True
+            opts["writeautomaticsub"] = True
+            opts["subtitleslangs"] = langs or ["en"]
+            opts["subtitlesformat"] = "srt"
 
-    # Cookies: if data/cookies/<domain>.txt exists, use it. Also try generic cookies.txt
-    # yt-dlp supports --cookies; we just check generic file
-    generic_cookie = s.cookies_dir / "cookies.txt"
-    if generic_cookie.exists():
-        opts["cookiefile"] = str(generic_cookie)
+    # Proxy (Phase-5) — e.g., http://proxy:8080 for geo-blocked content
+    if s.ytdlp_proxy:
+        opts["proxy"] = s.ytdlp_proxy
+
+    # Cookies per-domain (Phase-5)
+    cookiefile = _resolve_cookiefile(url=url)
+    if cookiefile:
+        opts["cookiefile"] = cookiefile
 
     # Limit playlist items
     if s.allow_playlist:
@@ -192,7 +239,7 @@ def download_media(
     job_id = uuid.uuid4().hex[:10]
     outtmpl = str(s.download_dir / f"{job_id}_%(id)s.%(ext)s")
 
-    opts = build_ydl_opts(quality, outtmpl, progress_hook)
+    opts = build_ydl_opts(quality, outtmpl, progress_hook, url=url)
 
     log.info("yt-dlp start url=%s quality=%s job=%s", url, quality, job_id)
 
