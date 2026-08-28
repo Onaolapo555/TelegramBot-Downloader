@@ -1,0 +1,3 @@
+C:\Users\LENOVO\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py:2051: RuntimeWarning: coroutine 'on_startup' was never awaited
+  handle = None  # Needed to break cycles when an exception occurs.
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
