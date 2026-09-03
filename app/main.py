@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import sys
+import time
 
 import structlog
 from aiogram import Bot, Dispatcher
@@ -19,6 +21,26 @@ from app.core.cleanup import cleanup_loop
 from app.services.db import init_db
 
 log = structlog.get_logger()
+
+# Track uptime for / and /uptime endpoints (used by Render / UptimeRobot)
+_START_TIME = time.monotonic()
+
+
+def _get_effective_port(s) -> int:
+    """Resolve port for Render/Railway/Koyeb: prefer $PORT, fallback to s.effective_port / webapp_port."""
+    # s.effective_port already handles PORT via Settings.port
+    try:
+        if hasattr(s, "effective_port"):
+            return int(s.effective_port)  # type: ignore
+    except Exception:
+        pass
+    port_env = os.getenv("PORT")
+    if port_env:
+        try:
+            return int(port_env)
+        except ValueError:
+            pass
+    return int(s.webapp_port)
 
 
 def setup_logging():
@@ -198,109 +220,140 @@ def build_app() -> tuple[Bot, Dispatcher, web.Application | None]:
     dp.startup.register(_startup_wrapper)
     dp.shutdown.register(_shutdown_wrapper)
 
-    # Build aiohttp app for webhook OR for metrics/health even in polling mode (Phase-5)
-    # Metrics/health are always registered if enable_metrics, so polling deploy can still be monitored
-    metrics_app: web.Application | None = None
-    if s.enable_metrics or (s.use_webhook and s.webhook_url):
-        metrics_app = web.Application()
-        # health
-        async def health(request):  # type: ignore
-            return web.json_response({"status": "ok", "bot": "online"})
+    # Always build a health/keepalive app — required for Render / UptimeRobot.
+    # Previously health was only added when enable_metrics=True, so UptimeRobot
+    # pinging "/" or "/health" could get 404 when metrics were disabled.
+    # Now "/" , "/ping" , "/health" always return 200, even in polling mode.
+    metrics_app: web.Application = web.Application()
 
-        async def health_detailed(request):  # type: ignore
-            details = {"status": "ok"}
+    # --- keepalive / root handlers (fix UptimeRobot 404 on Render free tier) ---
+    async def root(request):  # type: ignore
+        uptime_s = int(time.monotonic() - _START_TIME)
+        # Support both JSON and plain-text checks (UptimeRobot keyword monitoring)
+        accept = request.headers.get("Accept", "")
+        if "text/html" in accept:
+            return web.Response(
+                text=f"<html><body><h1>UniMedia Bot is running</h1><p>Uptime: {uptime_s}s</p><p><a href='/health'>/health</a> · <a href='/metrics'>/metrics</a></p></body></html>",
+                content_type="text/html",
+            )
+        return web.json_response(
+            {"status": "ok", "bot": "online", "service": "unimedia-downloader", "uptime_seconds": uptime_s}
+        )
+
+    async def ping(request):  # type: ignore
+        # UptimeRobot loves /ping returning 200 + pong
+        return web.json_response({"status": "ok", "ping": "pong"})
+
+    async def alive(request):  # type: ignore
+        return web.Response(text="OK", content_type="text/plain")
+
+    async def health(request):  # type: ignore
+        return web.json_response({"status": "ok", "bot": "online"})
+
+    async def health_detailed(request):  # type: ignore
+        details = {"status": "ok"}
+        try:
+            from sqlalchemy import text as sa_text
+
+            from app.services.db import get_engine
+
+            engine = get_engine()
+            async with engine.connect() as conn:
+                await conn.execute(sa_text("SELECT 1"))
+            details["db"] = "ok"
+        except Exception as e:
+            details["db"] = f"error: {e}"
+            details["status"] = "degraded"
+        try:
+            from app.services.redis import get_redis
+
+            r = await get_redis()
+            if r:
+                await r.ping()
+                details["redis"] = "ok"
+            else:
+                details["redis"] = "disabled (in-memory fallback)"
+        except Exception as e:
+            details["redis"] = f"error: {e}"
+        status = 200 if details["status"] == "ok" else 503
+        return web.json_response(details, status=status)
+
+    # Prometheus-style metrics (Phase-5 observability)
+    async def metrics(request):  # type: ignore
+        # JSON metrics + Prometheus text fallback via Accept header
+        try:
+            from app.services.job_service import count_jobs, total_jobs
+            from app.services.redis import get_stat
+            from app.services.user_service import count_users, total_downloads
+
+            users = await count_users()
+            downloads = await total_downloads()
+            jobs_total = await total_jobs()
+            jobs_done = await count_jobs("done")
+            jobs_failed = await count_jobs("failed")
+            jobs_queued = await count_jobs("queued")
+            redis_success = await get_stat("downloads_success")
+            redis_failed = await get_stat("downloads_failed")
+            # disk usage of download dir
             try:
-                from sqlalchemy import text as sa_text
+                import shutil
 
-                from app.services.db import get_engine
+                du = shutil.disk_usage(str(s.download_dir))
+                disk_free_mb = du.free // (1024 * 1024)
+                disk_total_mb = du.total // (1024 * 1024)
+            except Exception:
+                disk_free_mb = disk_total_mb = 0
+            data = {
+                "users": users,
+                "downloads_db": downloads,
+                "jobs_total": jobs_total,
+                "jobs_done": jobs_done,
+                "jobs_failed": jobs_failed,
+                "jobs_queued": jobs_queued,
+                "redis_success": redis_success,
+                "redis_failed": redis_failed,
+                "disk_free_mb": disk_free_mb,
+                "disk_total_mb": disk_total_mb,
+                "threshold_bytes": s.large_file_threshold_bytes,
+            }
+            # If Prometheus requested, render text
+            accept = request.headers.get("Accept", "")
+            if "text/plain" in accept:
+                lines = []
+                for k, v in data.items():
+                    lines.append(f"# HELP unimedia_{k} {k}")
+                    lines.append(f"# TYPE unimedia_{k} gauge")
+                    lines.append(f"unimedia_{k} {v}")
+                return web.Response(text="\n".join(lines), content_type="text/plain")
+            return web.json_response(data)
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
 
-                engine = get_engine()
-                async with engine.connect() as conn:
-                    await conn.execute(sa_text("SELECT 1"))
-                details["db"] = "ok"
-            except Exception as e:
-                details["db"] = f"error: {e}"
-                details["status"] = "degraded"
-            try:
-                from app.services.redis import get_redis
+    # Register keepalive routes — cover every path UptimeRobot/Render might ping.
+    # aiohttp's add_get automatically handles HEAD, so only GET needed (avoids duplicate HEAD error).
+    for path, handler in [
+        ("/", root),
+        ("/ping", ping),
+        ("/alive", alive),
+        ("/uptime", alive),
+        ("/health", health),
+        ("/healthz", health_detailed),
+        ("/status", health),
+    ]:
+        metrics_app.router.add_get(path, handler)
 
-                r = await get_redis()
-                if r:
-                    await r.ping()
-                    details["redis"] = "ok"
-                else:
-                    details["redis"] = "disabled (in-memory fallback)"
-            except Exception as e:
-                details["redis"] = f"error: {e}"
-            status = 200 if details["status"] == "ok" else 503
-            return web.json_response(details, status=status)
-
-        # Prometheus-style metrics (Phase-5 observability)
-        async def metrics(request):  # type: ignore
-            # JSON metrics + Prometheus text fallback via Accept header
-            try:
-                from app.services.job_service import count_jobs, total_jobs
-                from app.services.redis import get_stat
-                from app.services.user_service import count_users, total_downloads
-
-                users = await count_users()
-                downloads = await total_downloads()
-                jobs_total = await total_jobs()
-                jobs_done = await count_jobs("done")
-                jobs_failed = await count_jobs("failed")
-                jobs_queued = await count_jobs("queued")
-                redis_success = await get_stat("downloads_success")
-                redis_failed = await get_stat("downloads_failed")
-                # disk usage of download dir
-                try:
-                    import shutil
-
-                    du = shutil.disk_usage(str(s.download_dir))
-                    disk_free_mb = du.free // (1024 * 1024)
-                    disk_total_mb = du.total // (1024 * 1024)
-                except Exception:
-                    disk_free_mb = disk_total_mb = 0
-                data = {
-                    "users": users,
-                    "downloads_db": downloads,
-                    "jobs_total": jobs_total,
-                    "jobs_done": jobs_done,
-                    "jobs_failed": jobs_failed,
-                    "jobs_queued": jobs_queued,
-                    "redis_success": redis_success,
-                    "redis_failed": redis_failed,
-                    "disk_free_mb": disk_free_mb,
-                    "disk_total_mb": disk_total_mb,
-                    "threshold_bytes": s.large_file_threshold_bytes,
-                }
-                # If Prometheus requested, render text
-                accept = request.headers.get("Accept", "")
-                if "text/plain" in accept:
-                    lines = []
-                    for k, v in data.items():
-                        lines.append(f"# HELP unimedia_{k} {k}")
-                        lines.append(f"# TYPE unimedia_{k} gauge")
-                        lines.append(f"unimedia_{k} {v}")
-                    return web.Response(text="\n".join(lines), content_type="text/plain")
-                return web.json_response(data)
-            except Exception as e:
-                return web.json_response({"error": str(e)}, status=500)
-
-        metrics_app.router.add_get("/health", health)
-        metrics_app.router.add_get("/healthz", health_detailed)
-        if s.enable_metrics:
-            metrics_app.router.add_get("/metrics", metrics)
+    if s.enable_metrics:
+        metrics_app.router.add_get("/metrics", metrics)
 
     if s.use_webhook and s.webhook_url:
-        app = metrics_app or web.Application()
+        # Use metrics_app as base so keepalive routes are preserved in webhook mode
+        app = metrics_app
         SimpleRequestHandler(dispatcher=dp, bot=bot, secret_token=s.webhook_secret).register(
             app, path="/webhook"
         )
         setup_application(app, dp, bot=bot)
-        # If metrics_app was separate and we created new app, need to add health/metrics there too
-        # Already added if metrics_app was reused; if not, add now
         return bot, dp, app
-    # Polling mode: if metrics enabled, return metrics_app for background serving
+    # Polling mode: always return health app for background serving (fixes Render 404)
     return bot, dp, metrics_app
 
 
@@ -309,17 +362,20 @@ async def polling_main():
     bot, dp, metrics_app = build_app()
     # background cleanup with proper lifecycle
     cleanup_task = asyncio.create_task(cleanup_loop())
-    # metrics server (Phase-5) — even in polling mode, expose /health /metrics
+    # health/keepalive server (Phase-5) — even in polling mode, expose /health /metrics
+    # Fix Render free tier: bind to $PORT if set, not just WEBAPP_PORT, and always start server
     metrics_runner = None
     if metrics_app is not None:
         try:
+            port = _get_effective_port(s)
             metrics_runner = web.AppRunner(metrics_app)
             await metrics_runner.setup()
-            site = web.TCPSite(metrics_runner, host=s.webapp_host, port=s.webapp_port)
+            site = web.TCPSite(metrics_runner, host=s.webapp_host, port=port)
             await site.start()
-            log.info("metrics_server_started", host=s.webapp_host, port=s.webapp_port)
+            log.info("health_server_started", host=s.webapp_host, port=port, mode="polling")
+            log.info("keepalive_endpoints", endpoints="/, /ping, /health, /healthz, /metrics")
         except OSError as e:
-            log.warning("metrics_server_failed", error=str(e))
+            log.warning("health_server_failed", error=str(e))
             metrics_runner = None
     log.info("starting_polling")
     try:
@@ -345,8 +401,9 @@ async def webhook_main():
     cleanup_task = asyncio.create_task(cleanup_loop())
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, host=s.webapp_host, port=s.webapp_port)
-    log.info("starting_webhook", host=s.webapp_host, port=s.webapp_port, webhook=s.webhook_url)
+    port = _get_effective_port(s)
+    site = web.TCPSite(runner, host=s.webapp_host, port=port)
+    log.info("starting_webhook", host=s.webapp_host, port=port, webhook=s.webhook_url)
     await site.start()
     try:
         while True:

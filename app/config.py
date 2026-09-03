@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     webhook_secret: str | None = Field(default=None, alias="WEBHOOK_SECRET")
     webapp_host: str = Field(default="0.0.0.0", alias="WEBAPP_HOST")
     webapp_port: int = Field(default=8080, alias="WEBAPP_PORT")
+    # Render / Railway / Koyeb inject PORT env var — support it directly
+    port: int | None = Field(default=None, alias="PORT")
 
     # Redis
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
@@ -115,6 +117,22 @@ class Settings(BaseSettings):
     @classmethod
     def _to_path(cls, v):
         return Path(v) if isinstance(v, str) else v
+
+    @property
+    def effective_port(self) -> int:
+        """Render / Koyeb / Railway set PORT — prefer it over WEBAPP_PORT to avoid 404/binding issues."""
+        if self.port is not None:
+            return self.port
+        # fallback: check raw env in case pydantic didn't capture string port
+        import os
+
+        port_env = os.getenv("PORT")
+        if port_env:
+            try:
+                return int(port_env)
+            except ValueError:
+                pass
+        return self.webapp_port
 
     def ensure_dirs(self) -> None:
         self.download_dir.mkdir(parents=True, exist_ok=True)
