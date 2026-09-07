@@ -42,21 +42,13 @@ async def probe_metadata(url: str, quality: str | None = None) -> dict[str, Any]
         "no_cache_dir": False,  # use yt-dlp cache for extractors
     }
     # Phase-5: per-domain cookies + proxy + playlist limit
+    # For YouTube, keep default extractor (no forced client) — gives 45 formats vs 4 with forced android, SABR-safe.
     try:
-        from app.core.downloader import _resolve_cookiefile, _is_youtube_url
+        from app.core.downloader import _resolve_cookiefile
 
         cf = _resolve_cookiefile(url=url)
         if cf:
             opts["cookiefile"] = cf
-        # YouTube bot-bypass — same as downloader (android/ios/web) for probe, does not affect other sites
-        if _is_youtube_url(url):
-            opts["extractor_args"] = {
-                "youtube": {
-                    "player_client": ["android", "ios", "web"],
-                    "player_skip": ["webpage", "configs"],
-                }
-            }
-            opts["extractor_retries"] = 3
     except Exception:
         pass
     if s.ytdlp_proxy:
@@ -65,24 +57,21 @@ async def probe_metadata(url: str, quality: str | None = None) -> dict[str, Any]
         opts["playlistend"] = s.playlist_max_items
 
     def _probe():
-        # Retry once for YouTube bot detection with fallback client
-        from app.core.downloader import _is_youtube_url, is_youtube_bot_error
+        from app.core.downloader import (
+            _is_youtube_url,
+            _sanitize_cookie_content,
+            is_cookie_encoding_error,
+            is_format_not_available_error,
+            is_youtube_bot_error,
+            is_youtube_reload_error,
+        )
 
-        attempts = 2 if _is_youtube_url(url) else 1
+        attempts = 5 if _is_youtube_url(url) else 1
         last_exc: Exception | None = None
         for attempt in range(attempts):
             try:
-                if attempt == 1:
-                    # Fallback to tv_embedded
-                    opts["extractor_args"] = {
-                        "youtube": {
-                            "player_client": ["tv_embedded", "android", "web"],
-                            "player_skip": ["webpage"],
-                        }
-                    }
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     info = ydl.extract_info(url, download=False)
-                    # handle playlist: take first entry
                     if info and "entries" in info:
                         entries = list(info["entries"])
                         if entries:
@@ -95,8 +84,32 @@ async def probe_metadata(url: str, quality: str | None = None) -> dict[str, Any]
                 last_exc = e
                 if _is_youtube_url(url) and is_youtube_bot_error(e):
                     if attempt + 1 < attempts:
+                        opts["extractor_args"] = {
+                            "youtube": {"player_client": ["tv_embedded", "android", "web"], "player_skip": ["webpage"]}
+                        }
                         continue
-                    # last attempt still bot error — will raise friendly below
+                elif _is_youtube_url(url) and (is_youtube_reload_error(e) or is_cookie_encoding_error(e)):
+                    if attempt + 1 < attempts:
+                        try:
+                            from app.config import get_settings as _gs
+
+                            cf = opts.get("cookiefile")
+                            if cf:
+                                p = _gs().cookies_dir / "youtube.txt"
+                                if p.exists():
+                                    txt = p.read_text(encoding="utf-8", errors="ignore")
+                                    sanitized = _sanitize_cookie_content(txt)
+                                    if sanitized != txt:
+                                        p.write_text(sanitized, encoding="utf-8")
+                        except Exception:
+                            pass
+                        opts.pop("cookiefile", None)
+                        opts.pop("extractor_args", None)
+                        continue
+                elif _is_youtube_url(url) and is_format_not_available_error(e):
+                    if attempt + 1 < attempts:
+                        opts.pop("extractor_args", None)
+                        continue
                 else:
                     raise
         if last_exc and is_youtube_bot_error(last_exc):
@@ -104,6 +117,14 @@ async def probe_metadata(url: str, quality: str | None = None) -> dict[str, Any]
                 "YouTube bot check failed (Sign in to confirm you’re not a bot). "
                 "Add cookies to data/cookies/youtube.txt or set YOUTUBE_COOKIES env var. "
                 "See https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp"
+            ) from last_exc
+        if last_exc and (is_youtube_reload_error(last_exc) or is_cookie_encoding_error(last_exc)):
+            raise RuntimeError(
+                "YouTube cookies invalid (latin-1 at pos 631). Sanitized and retried without cookies — still failed. Re-export as base64 -w0."
+            ) from last_exc
+        if last_exc and is_format_not_available_error(last_exc):
+            raise RuntimeError(
+                "YouTube: Requested format is not available for this video. Try Best/720p/Audio."
             ) from last_exc
         if last_exc:
             raise last_exc

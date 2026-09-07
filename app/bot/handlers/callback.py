@@ -239,12 +239,60 @@ async def _do_download(callback: CallbackQuery, url: str, quality: Quality, job_
 
     except Exception as e:
         log.exception("download failed %s %s", url, quality)
-        # Friendly YouTube bot error — don't show raw traceback, show help text
+        # Friendly YouTube errors — don't show raw traceback
         try:
-            from app.core.downloader import is_youtube_bot_error, youtube_bot_help_text
+            from app.core.downloader import (
+                is_cookie_encoding_error,
+                is_format_not_available_error,
+                is_youtube_bot_error,
+                is_youtube_reload_error,
+                youtube_bot_help_text,
+                youtube_cookie_help_text,
+                youtube_format_help_text,
+                youtube_reload_help_text,
+            )
 
             if is_youtube_bot_error(e):
                 friendly = youtube_bot_help_text()
+                if job_id:
+                    try:
+                        await update_job_status(job_id, "failed", error=str(e)[:2000])
+                        await incr_stat("downloads_failed")
+                    except Exception:
+                        pass
+                try:
+                    await status_msg.edit_text(friendly)
+                except Exception:
+                    await bot.send_message(chat_id, friendly)
+                return
+            if is_cookie_encoding_error(e):
+                friendly = youtube_cookie_help_text()
+                if job_id:
+                    try:
+                        await update_job_status(job_id, "failed", error=str(e)[:2000])
+                        await incr_stat("downloads_failed")
+                    except Exception:
+                        pass
+                try:
+                    await status_msg.edit_text(friendly)
+                except Exception:
+                    await bot.send_message(chat_id, friendly)
+                return
+            if is_youtube_reload_error(e):
+                friendly = youtube_reload_help_text()
+                if job_id:
+                    try:
+                        await update_job_status(job_id, "failed", error=str(e)[:2000])
+                        await incr_stat("downloads_failed")
+                    except Exception:
+                        pass
+                try:
+                    await status_msg.edit_text(friendly)
+                except Exception:
+                    await bot.send_message(chat_id, friendly)
+                return
+            if is_format_not_available_error(e):
+                friendly = youtube_format_help_text()
                 if job_id:
                     try:
                         await update_job_status(job_id, "failed", error=str(e)[:2000])

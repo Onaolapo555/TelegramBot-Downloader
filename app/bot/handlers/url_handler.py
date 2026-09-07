@@ -28,6 +28,27 @@ def _friendly_probe_error(e: Exception) -> str:
             return youtube_bot_help_text()
     except Exception:
         pass
+    try:
+        from app.core.downloader import is_cookie_encoding_error, youtube_cookie_help_text
+
+        if is_cookie_encoding_error(e):
+            return youtube_cookie_help_text()
+    except Exception:
+        pass
+    try:
+        from app.core.downloader import is_youtube_reload_error, youtube_reload_help_text
+
+        if is_youtube_reload_error(e):
+            return youtube_reload_help_text()
+    except Exception:
+        pass
+    try:
+        from app.core.downloader import is_format_not_available_error, youtube_format_help_text
+
+        if is_format_not_available_error(e):
+            return youtube_format_help_text()
+    except Exception:
+        pass
     if "youtube" in msg and ("sign in to confirm" in msg or "not a bot" in msg or "use --cookies" in msg):
         try:
             from app.core.downloader import youtube_bot_help_text
@@ -40,6 +61,29 @@ def _friendly_probe_error(e: Exception) -> str:
             "YouTube requires cookies. Add <code>data/cookies/youtube.txt</code> or set <code>YOUTUBE_COOKIES</code> env var.\n"
             "Other sites still work."
         )
+    if "the page needs to be reloaded" in msg:
+        try:
+            from app.core.downloader import youtube_reload_help_text
+
+            return youtube_reload_help_text()
+        except Exception:
+            pass
+    if "latin-1" in msg and "can't encode" in msg:
+        try:
+            from app.core.downloader import youtube_cookie_help_text
+
+            return youtube_cookie_help_text()
+        except Exception:
+            pass
+    if "requested format is not available" in msg:
+        try:
+            from app.core.downloader import youtube_format_help_text
+
+            # Only YouTube shows this after our SABR-safe fallback; other sites rarely hit it
+            if "youtube" in msg or "use --list-formats" in msg:
+                return youtube_format_help_text()
+        except Exception:
+            pass
     if "twitter" in msg or "x.com" in msg:
         if "json" in msg or "parse" in msg or "update" in msg or "expecting value" in msg:
             return (
