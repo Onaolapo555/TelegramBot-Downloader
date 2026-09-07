@@ -17,6 +17,8 @@ data/*.db
 *.webp
 *.cookies
 cookies.txt
+data/cookies/*.txt
+!data/cookies/.gitkeep
 .idea/
 .vscode/
 *.log

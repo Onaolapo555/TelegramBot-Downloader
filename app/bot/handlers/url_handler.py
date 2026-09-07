@@ -20,6 +20,26 @@ router = Router()
 def _friendly_probe_error(e: Exception) -> str:
     msg = str(e).lower()
     raw = html.escape(str(e)[:450])
+    # YouTube bot check — most common, handle first with friendly non-technical message
+    try:
+        from app.core.downloader import is_youtube_bot_error, youtube_bot_help_text
+
+        if is_youtube_bot_error(e):
+            return youtube_bot_help_text()
+    except Exception:
+        pass
+    if "youtube" in msg and ("sign in to confirm" in msg or "not a bot" in msg or "use --cookies" in msg):
+        try:
+            from app.core.downloader import youtube_bot_help_text
+
+            return youtube_bot_help_text()
+        except Exception:
+            pass
+        return (
+            "❌ <b>YouTube is blocking downloads</b> (Sign in to confirm you’re not a bot)\n\n"
+            "YouTube requires cookies. Add <code>data/cookies/youtube.txt</code> or set <code>YOUTUBE_COOKIES</code> env var.\n"
+            "Other sites still work."
+        )
     if "twitter" in msg or "x.com" in msg:
         if "json" in msg or "parse" in msg or "update" in msg or "expecting value" in msg:
             return (

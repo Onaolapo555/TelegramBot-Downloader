@@ -130,9 +130,18 @@ async def download_job(
             except Exception:
                 pass
         try:
-            await bot.edit_message_text(f"❌ Failed: <code>{e}</code>", chat_id=chat_id, message_id=status_message_id)
+            from app.core.downloader import is_youtube_bot_error, youtube_bot_help_text
+
+            if is_youtube_bot_error(e):
+                friendly = youtube_bot_help_text()
+                await bot.edit_message_text(friendly, chat_id=chat_id, message_id=status_message_id)
+            else:
+                await bot.edit_message_text(f"❌ Failed: <code>{e}</code>", chat_id=chat_id, message_id=status_message_id)
         except Exception:
-            pass
+            try:
+                await bot.edit_message_text(f"❌ Failed: <code>{e}</code>", chat_id=chat_id, message_id=status_message_id)
+            except Exception:
+                pass
         raise
     finally:
         if filepath and filepath.exists():

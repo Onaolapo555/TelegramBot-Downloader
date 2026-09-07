@@ -79,6 +79,9 @@ class Settings(BaseSettings):
     ytdlp_auto_update: bool = Field(default=True, alias="YTDLP_AUTO_UPDATE")  # Phase-5 fix: always keep yt-dlp fresh
     ytdlp_auto_update_interval_hours: int = Field(default=6, alias="YTDLP_AUTO_UPDATE_INTERVAL_HOURS")
 
+    # YouTube cookies (Render ephemeral fix): set YOUTUBE_COOKIES env to Netscape content or base64 — auto-creates data/cookies/youtube.txt
+    youtube_cookies: str | None = Field(default=None, alias="YOUTUBE_COOKIES")
+
     # Phase-5.1: Insane speed tuning (yt-dlp native + aria2c chunking)
     use_aria2: bool = Field(default=True, alias="USE_ARIA2")
     fast_mode: bool = Field(default=True, alias="FAST_MODE")  # skip thumbnail embedding for max speed
