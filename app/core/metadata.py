@@ -84,9 +84,18 @@ async def probe_metadata(url: str, quality: str | None = None) -> dict[str, Any]
                 last_exc = e
                 if _is_youtube_url(url) and is_youtube_bot_error(e):
                     if attempt + 1 < attempts:
-                        opts["extractor_args"] = {
-                            "youtube": {"player_client": ["tv_embedded", "android", "web"], "player_skip": ["webpage"]}
-                        }
+                        if attempt == 0:
+                            opts["extractor_args"] = {
+                                "youtube": {"player_client": ["tv_embedded", "android", "web"], "player_skip": ["webpage"]}
+                            }
+                        elif attempt == 1:
+                            opts.pop("cookiefile", None)
+                            opts.pop("extractor_args", None)
+                        elif attempt == 2:
+                            opts["extractor_args"] = {"youtube": {"player_client": ["android"]}}
+                            opts.pop("cookiefile", None)
+                        else:
+                            opts.pop("extractor_args", None)
                         continue
                 elif _is_youtube_url(url) and (is_youtube_reload_error(e) or is_cookie_encoding_error(e)):
                     if attempt + 1 < attempts:

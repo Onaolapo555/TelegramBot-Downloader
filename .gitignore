@@ -4,10 +4,17 @@ __pycache__/
 .venv/
 venv/
 .env
+.env.*
+!.env.example
+*.bak
+*.bak.*
 data/downloads/*
 !data/downloads/.gitkeep
 data/bot.db
 data/*.db
+data/*.log
+data/*.log.*
+data/bot.log*
 *.mp4
 *.mkv
 *.webm

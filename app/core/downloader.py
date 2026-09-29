@@ -518,16 +518,33 @@ def download_media(
             break
         except Exception as e:
             last_exc = e
-            # Bot check — retry with fallback client
+            # Bot check — retry with fallback clients, then without cookies
             if _is_youtube_url(url) and is_youtube_bot_error(e):
                 if attempt + 1 < attempts:
-                    log.warning("youtube_bot_detected retrying with fallback client: %s", str(e)[:300])
-                    opts["extractor_args"] = {
-                        "youtube": {
-                            "player_client": ["tv_embedded", "android", "web"],
-                            "player_skip": ["webpage"],
+                    # First bot retry: tv_embedded with cookies kept
+                    if attempt == 0:
+                        log.warning("youtube_bot_detected retrying with tv_embedded+cookies: %s", str(e)[:300])
+                        opts["extractor_args"] = {
+                            "youtube": {
+                                "player_client": ["tv_embedded", "android", "web"],
+                                "player_skip": ["webpage"],
+                            }
                         }
-                    }
+                    # Second bot retry: without cookies (public videos work without)
+                    elif attempt == 1:
+                        log.warning("youtube_bot_detected retrying without cookies: %s", str(e)[:300])
+                        opts.pop("cookiefile", None)
+                        opts.pop("extractor_args", None)
+                        opts["format"] = "best"
+                    # Third bot retry: android only without cookies
+                    elif attempt == 2:
+                        log.warning("youtube_bot_detected retrying android without cookies: %s", str(e)[:300])
+                        opts["extractor_args"] = {"youtube": {"player_client": ["android"]}}
+                        opts.pop("cookiefile", None)
+                    else:
+                        log.warning("youtube_bot_detected retrying best: %s", str(e)[:300])
+                        opts["format"] = "best"
+                        opts.pop("extractor_args", None)
                     try:
                         for p in s.download_dir.glob(f"{job_id}_*"):
                             if p.is_file():
