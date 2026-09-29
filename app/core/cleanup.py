@@ -13,7 +13,9 @@ async def cleanup_loop() -> None:
     """Background task: delete files older than TMP_CLEANUP_SECONDS and prune old DB jobs (lightweight DB)."""
     s = get_settings()
     interval = 60  # check every minute for files
-    last_job_prune = 0.0
+    # Wait a full interval before first DB prune — init_db runs in on_startup,
+    # previously first prune ran immediately and logged "no such table: jobs" on fresh Render deploys.
+    last_job_prune = time.monotonic()
     while True:
         try:
             now = time.time()

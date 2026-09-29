@@ -124,18 +124,31 @@ async def on_startup(bot: Bot):
     except Exception as e:
         log.warning("redis_init_failed", error=str(e))
 
-    # webhook setup
-    if s.use_webhook and s.webhook_url:
-        await bot.set_webhook(
-            url=s.webhook_url,
-            secret_token=s.webhook_secret,
-            drop_pending_updates=True,
-        )
-        log.info("webhook_set", url=s.webhook_url)
-    else:
-        # polling mode - delete webhook
-        await bot.delete_webhook(drop_pending_updates=True)
-        log.info("polling_mode - webhook deleted")
+    # webhook setup — catch invalid/revoked token with a clear message
+    # (Render "TelegramUnauthorizedError: Unauthorized" always means BOT_TOKEN is wrong/deleted —
+    #  create a new bot via @BotFather /newbot and update BOT_TOKEN in Render Environment).
+    try:
+        if s.use_webhook and s.webhook_url:
+            await bot.set_webhook(
+                url=s.webhook_url,
+                secret_token=s.webhook_secret,
+                drop_pending_updates=True,
+            )
+            log.info("webhook_set", url=s.webhook_url)
+        else:
+            # polling mode - delete webhook
+            await bot.delete_webhook(drop_pending_updates=True)
+            log.info("polling_mode - webhook deleted")
+    except Exception as e:
+        err = str(e).lower()
+        if "unauthorized" in err:
+            log.error(
+                "FATAL: BOT_TOKEN invalid/revoked — Telegram says Unauthorized. "
+                "Create a new bot via @BotFather /newbot and set the new BOT_TOKEN in Render "
+                "Dashboard > Service > Environment, then Manual Deploy."
+            )
+            raise RuntimeError("BOT_TOKEN invalid — update it in Render Environment") from e
+        raise
 
     # yt-dlp version + auto-update (Phase-5 fix: always fresh)
     try:
@@ -360,6 +373,14 @@ def build_app() -> tuple[Bot, Dispatcher, web.Application | None]:
 async def polling_main():
     s = get_settings()
     bot, dp, metrics_app = build_app()
+    # Init DB BEFORE starting cleanup loop — previously cleanup ran first and logged
+    # "no such table: jobs" on fresh Render deploys (on_startup init happens later via polling).
+    # init_db is idempotent (create_all checkfirst), on_startup re-runs it safely.
+    try:
+        await init_db()
+        log.info("db_initialized_early")
+    except Exception as e:
+        log.warning("db_early_init_failed", error=str(e))
     # background cleanup with proper lifecycle
     cleanup_task = asyncio.create_task(cleanup_loop())
     # health/keepalive server (Phase-5) — even in polling mode, expose /health /metrics
